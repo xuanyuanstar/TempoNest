@@ -42,6 +42,7 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 		int &incRED,
 		int &incDM,
 		int &incScat, 
+		int &incSW,
 		int &doTimeMargin,
 		int &doJumpMargin,
 		double &FitSig,
@@ -55,15 +56,20 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 		double *DMAmpPrior,
 		double *ScatAlphaPrior,
                 double *ScatAmpPrior, 
+		double *SWAlphaPrior,
+		double *SWAmpPrior,
 		double &numRedCoeff,
 		double &numDMCoeff,
 		double &numScatCoeff, 
+		double &numSWCoeff,
 		int &numRedPL,
 		int &numDMPL,
-		int &numScatPL, 
+		int &numScatPL,
+		int &numSWPL,
 		double *RedCoeffPrior,
 		double *DMCoeffPrior,
 		double *ScatCoeffPrior, 
+		double *SWCoeffPrior,
 		int &FloatingDM,
 		double *DMFreqPrior,
 		int &yearlyDM,
@@ -81,7 +87,8 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 		double *GWBAmpPrior,
 		int &RedPriorType,
 		int &DMPriorType,
-		int &ScatPriorType, 
+		int &ScatPriorType,
+		int &SWPriorType,
 		int &EQUADPriorType,
 		int &EFACPriorType,
 		int &useOriginalErrors,
@@ -115,9 +122,9 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 		int &numGroupCoeff,
 		double *GroupNoiseAmpPrior,
 		double *GroupNoiseAlphaPrior,
-                int &FitSolarWind,
+		int &FitSolarWind,
                 int &FitWhiteSolarWind,
-                double *SolarWindPrior,
+		double *SolarWindPrior,
                 double *WhiteSolarWindPrior,
 		int &GPTA,
 		char *GroupNoiseFlag,
@@ -226,9 +233,8 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 
 	JitterProfComp = 0;
 
-	FitSolarWind = 0; // Basically for for ne_sw
+	FitSolarWind = 0; // Basically for ne_sw
 	FitWhiteSolarWind = 0; //Fit for a white component proportional to tdis2 with ne_sw=1
-
 
 	strcpy( whiteflag, "-sys");
 	whitemodel=0;
@@ -238,6 +244,7 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 	incRED=0; //include Red Noise model: 0 = no, 1 = power law model (vHL2013), 2 = model independent (L2013)
 	incDM=0; //include Red Noise model: 0 = no, 1 = power law model (vHL2013), 2 = model independent (L2013)
 	incScat=0; //include Scattering noise model: 0 = no, 1 = similar to power law model=3 for DM
+	incSW=0; //include SW noise model: 0 = no, 3 for a power-law red noise model, see Lentati et al. 2014
 	
 	FitLowFreqCutoff = 0; //Include f_low as a free parameter
 
@@ -307,6 +314,7 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 	RedPriorType = 0; // 0 = Log, 1 = Uniform
 	DMPriorType = 0;   // 0 = Log, 1 = Uniform
 	ScatPriorType = 0; // 0 = Log, 1 = Uniform
+	SWPriorType = 0; // 0 = Log, 1 = Uniform
 	EQUADPriorType = 0;   // 0 = Log, 1 = Uniform
 	EFACPriorType = 0;   // 0 = Log, 1 = Uniform
 	usecosiprior = 0; // 0 = uniform in sini, 1 = uniform in cosi
@@ -334,10 +342,12 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 	numRedPL=1;
 	numDMPL=1;
 	numScatPL=1;
+	numSWPL=1;
 	
 	numRedCoeff=10;
 	numDMCoeff=10;
 	numScatCoeff=10;
+	numSWCoeff=10;
 
 	varyRedCoeff=0;
 	varyDMCoeff=0;
@@ -359,6 +369,12 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 
         ScatAmpPrior[0]=-18;
         ScatAmpPrior[1]=-4;
+
+	SWAlphaPrior[0]=1.1;
+        SWAlphaPrior[1]=6.1;
+
+        SWAmpPrior[0]=-18;
+        SWAmpPrior[1]=-4;
 	
 	RedCoeffPrior[0]=-10;
 	RedCoeffPrior[1]=0;
@@ -485,11 +501,10 @@ void setupparams(char *ConfigFileName, int &useGPUS,
         parameters.readInto(WhiteSolarWindPrior[1], "WhiteSolarWindPrior[1]", WhiteSolarWindPrior[1]);
 
 
-
-
         parameters.readInto(incRED, "incRED", incRED);
 	parameters.readInto(incDM, "incDM", incDM);
 	parameters.readInto(incScat, "incScat", incScat);
+	parameters.readInto(incSW, "incSW", incSW);
 	parameters.readInto(doTimeMargin, "doTimeMargin", doTimeMargin);
         parameters.readInto(doJumpMargin, "doJumpMargin", doJumpMargin);
         parameters.readInto(customPriors, "customPriors", customPriors);
@@ -507,9 +522,11 @@ void setupparams(char *ConfigFileName, int &useGPUS,
         parameters.readInto(numRedCoeff, "numRedCoeff", numRedCoeff);
 	parameters.readInto(numDMCoeff, "numDMCoeff", numDMCoeff);
 	parameters.readInto(numScatCoeff, "numScatCoeff", numScatCoeff);
+	parameters.readInto(numSWCoeff, "numSWCoeff", numSWCoeff);
         parameters.readInto(numRedPL, "numRedPL", numRedPL);
 	parameters.readInto(numDMPL, "numDMPL", numDMPL);
 	parameters.readInto(numScatPL, "numScatPL", numScatPL);
+	parameters.readInto(numSWPL, "numSWPL", numSWPL);
         parameters.readInto(RedCoeffPrior[0], "RedCoeffPrior[0]", RedCoeffPrior[0]);
         parameters.readInto(RedCoeffPrior[1], "RedCoeffPrior[1]", RedCoeffPrior[1]);
         parameters.readInto(DMCoeffPrior[0], "DMCoeffPrior[0]", DMCoeffPrior[0]);
@@ -522,6 +539,10 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 	parameters.readInto(ScatAlphaPrior[1], "ScatAlphaPrior[1]", ScatAlphaPrior[1]);
 	parameters.readInto(ScatAmpPrior[0], "ScatAmpPrior[0]", ScatAmpPrior[0]);
         parameters.readInto(ScatAmpPrior[1], "ScatAmpPrior[1]", ScatAmpPrior[1]);
+        parameters.readInto(SWAlphaPrior[0], "SWAlphaPrior[0]", SWAlphaPrior[0]);
+        parameters.readInto(SWAlphaPrior[1], "SWAlphaPrior[1]", SWAlphaPrior[1]);
+        parameters.readInto(SWAmpPrior[0], "SWAmpPrior[0]", SWAmpPrior[0]);
+        parameters.readInto(SWAmpPrior[1], "SWAmpPrior[1]", SWAmpPrior[1]);
 	
         parameters.readInto(FloatingDM, "FloatingDM", FloatingDM);
 	parameters.readInto(yearlyDM, "yearlyDM", yearlyDM);
@@ -550,6 +571,7 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 	parameters.readInto(RedPriorType, "RedPriorType", RedPriorType);
 	parameters.readInto(DMPriorType, "DMPriorType", DMPriorType);
 	parameters.readInto(ScatPriorType, "ScatPriorType", ScatPriorType);
+	parameters.readInto(SWPriorType, "SWPriorType", SWPriorType);
 	parameters.readInto(EFACPriorType, "EFACPriorType", EFACPriorType);
 	parameters.readInto(EQUADPriorType, "EQUADPriorType", EQUADPriorType);
 	parameters.readInto(useOriginalErrors, "useOriginalErrors", useOriginalErrors);
@@ -787,7 +809,7 @@ void setTNPriors(char *ConfigFileName, double **Dpriors, long double **TempoPrio
 }
 
 
-void setFrequencies(char *ConfigFileName, double *SampleFreq, int numRedfreqs, int numDMfreqs, int numScatfreqs, int numRedLogFreqs, int numDMLogFreqs, int numScatLogFreqs, double RedLowFreq, double DMLowFreq, double ScatLowFreq, double RedMidFreq, double DMMidFreq, double ScatMidFreq){
+void setFrequencies(char *ConfigFileName, double *SampleFreq, int numRedfreqs, int numDMfreqs, int numScatfreqs, int numSWfreqs, int numRedLogFreqs, int numDMLogFreqs, int numScatLogFreqs, int numSWLogFreqs, double RedLowFreq, double DMLowFreq, double ScatLowFreq, double SWLowFreq, double RedMidFreq, double DMMidFreq, double ScatMidFreq, double SWMidFreq){
 
 //This function sets or overwrites the default values for the sampled frequencies sent to multinest
 
@@ -813,6 +835,11 @@ void setFrequencies(char *ConfigFileName, double *SampleFreq, int numRedfreqs, i
 		//printf("making freqs %i %g", startpoint+i, SampleFreq[startpoint+i]);
         }
 	for(int i =0;i < numScatfreqs; i++){
+                SampleFreq[startpoint]=i+1;
+                startpoint++;
+                //printf("making freqs %i %g", startpoint+i, SampleFreq[startpoint+i]);
+        }
+	for(int i =0;i < numSWfreqs; i++){
                 SampleFreq[startpoint]=i+1;
                 startpoint++;
                 //printf("making freqs %i %g", startpoint+i, SampleFreq[startpoint+i]);

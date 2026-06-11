@@ -430,7 +430,7 @@ void TNtextOutput(pulsar *psr, int npsr, int newpar, long double *Tempo2Fit, voi
                         }
               //  }
 //        printf("fitcount %i %i\n", fitcount, whitefitcount);	
-	if(incRED != 0 || ((MNStruct *)context)->incDM !=0 || ((MNStruct *)context)->incScat !=0 || ((MNStruct *)context)->numFitEFAC > 0 || ((MNStruct *)context)->numFitEQUAD > 0){
+			if(incRED != 0 || ((MNStruct *)context)->incDM !=0 || ((MNStruct *)context)->incScat !=0 || ((MNStruct *)context)->incSW !=0 || ((MNStruct *)context)->numFitEFAC > 0 || ((MNStruct *)context)->numFitEQUAD > 0){
 		whitefitcount=fitcount;
                 printf("------------------------------------------------------------------------------\n");
                 printf("Stochastic Parameters:\n");
@@ -559,6 +559,15 @@ void TNtextOutput(pulsar *psr, int npsr, int newpar, long double *Tempo2Fit, voi
 			printf("Spectral Index: %g +/- %g\n",paramarray[fitcount][0], paramarray[fitcount][1]);
                         fitcount++;
                 }
+
+		if(((MNStruct *)context)->incSW ==1 ){
+			printf("Power Law Solar Wind Model:\n");
+	                printf("Log Amplitude: %g +/- %g\n",paramarray[fitcount][0], paramarray[fitcount][1]);
+			fitcount++;
+			printf("Spectral Index: %g +/- %g\n",paramarray[fitcount][0], paramarray[fitcount][1]);
+                        fitcount++;
+                }
+
 
 		if(((MNStruct *)context)->incFloatDM > 0){
 			printf("Floating DM, %i Coefficients used:\n",((MNStruct *)context)->incFloatDM);
@@ -1533,15 +1542,25 @@ void TNtextOutput(pulsar *psr, int npsr, int newpar, long double *Tempo2Fit, voi
 
 	}
 	 if(((MNStruct *)context)->incScat ==1 ){
-                fprintf(fout2, "TNScatAmp %g\n", paramarray[whitefitcount][2]);
+                fprintf(fout2, "TNChromAmp %g\n", paramarray[whitefitcount][2]);
                 tablefile <<  "Log$_{10}$[Scat Amp] \\dotfill & "<< paramarray[whitefitcount][0] <<" $\\pm$ "<< paramarray[whitefitcount][1] <<"  \\\\ \n";
 		whitefitcount++;
-                 fprintf(fout2, "TNScatGam %g\n", paramarray[whitefitcount][2]);
-                fprintf(fout2, "TNScatC %i\n", ((MNStruct *)context)->numFitScatCoeff);
+                 fprintf(fout2, "TNChromGam %g\n", paramarray[whitefitcount][2]);
+                fprintf(fout2, "TNChromC %i\n", ((MNStruct *)context)->numFitScatCoeff);
+		fprintf(fout2, "TNChromidx 4\n");
 
                 tablefile <<  "Scat Index \\dotfill & "<< paramarray[whitefitcount][0] <<" $\\pm$ "<< paramarray[whitefitcount][1] <<"  \\\\ \n";
 		whitefitcount++;
+        }
+	 if(((MNStruct *)context)->incSW ==1 ){
+                fprintf(fout2, "TNSWAmp %g\n", paramarray[whitefitcount][2]);
+                tablefile <<  "Log$_{10}$[SW Amp] \\dotfill & "<< paramarray[whitefitcount][0] <<" $\\pm$ "<< paramarray[whitefitcount][1] <<"  \\\\ \n";
+		whitefitcount++;
+                 fprintf(fout2, "TNSWGam %g\n", paramarray[whitefitcount][2]);
+                fprintf(fout2, "TNSWC %i\n", ((MNStruct *)context)->numFitSWCoeff);
 
+                tablefile <<  "SW Index \\dotfill & "<< paramarray[whitefitcount][0] <<" $\\pm$ "<< paramarray[whitefitcount][1] <<"  \\\\ \n";
+		whitefitcount++;
         }
 	if(((MNStruct *)context)->incDMShapeEvent != 0){
                 for(int i =0; i < ((MNStruct *)context)->incDMShapeEvent; i++){

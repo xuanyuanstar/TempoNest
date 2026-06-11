@@ -839,7 +839,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 			double noiseval=0;
 			double ShannonJitterTerm=0;
 
-			double SWTerm = WhiteSolarWind*((MNStruct *)globalcontext)->pulse->obsn[o].tdis2/((MNStruct *)globalcontext)->pulse->ne_sw;
+			double SWTerm = WhiteSolarWind * ((MNStruct *)globalcontext)->pulse->obsn[o].tdis2 / ((MNStruct *)globalcontext)->pulse->ne_sw;
 			double DMEQUADTerm = DMEQUAD/(DMKappa*pow((double)((MNStruct *)globalcontext)->pulse->obsn[o].freqSSB,2));	
 						
 			
@@ -914,6 +914,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	int FitRedCoeff=2*(((MNStruct *)globalcontext)->numFitRedCoeff);
 	int FitDMCoeff=2*(((MNStruct *)globalcontext)->numFitDMCoeff);
 	int FitScatCoeff=2*(((MNStruct *)globalcontext)->numFitScatCoeff);
+	int FitSWCoeff=2*(((MNStruct *)globalcontext)->numFitSWCoeff);
 	int FitBandCoeff=2*(((MNStruct *)globalcontext)->numFitBandNoiseCoeff);
 	int FitGroupNoiseCoeff = 2*((MNStruct *)globalcontext)->numFitGroupNoiseCoeff;
 
@@ -1302,7 +1303,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 				}
 			}
 		}
-	} 
+	}
 
 
        if(((MNStruct *)globalcontext)->incDM==2){
@@ -1412,6 +1413,57 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
                         freqdet=freqdet+2*log(powercoeff[startpos+i]);
                 }
                 startpos+=FitScatCoeff;
+
+	}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////Solar wind variations ////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////
+	double *SWVec=new double[((MNStruct *)globalcontext)->pulse->nobs];
+
+	if(((MNStruct *)globalcontext)->incSW > 0) {
+	    for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++)
+	      SWVec[o]=((MNStruct *)globalcontext)->pulse->obsn[o].tdis2 / ((MNStruct *)globalcontext)->pulse->ne_sw;
+
+	  for(int i=0;i<FitSWCoeff/2;i++){
+
+	    freqs[startpos+i]=((MNStruct *)globalcontext)->sampleFreq[startpos/2 - ((MNStruct *)globalcontext)->incFloatRed+i]/maxtspan;
+	    freqs[startpos+i+FitSWCoeff/2]=freqs[startpos+i];
+
+	    if(((MNStruct *)globalcontext)->storeFMatrices == 0){
+	      for(int k=0;k<((MNStruct *)globalcontext)->pulse->nobs;k++){
+		double time=(double)((MNStruct *)globalcontext)->pulse->obsn[k].bat;
+
+		TotalMatrix[k + (i+TimetoMargin+startpos)*((MNStruct *)globalcontext)->pulse->nobs]=cos(2*M_PI*freqs[startpos+i]*time)*SWVec[k];
+		TotalMatrix[k + (i+FitSWCoeff/2+TimetoMargin+startpos)*((MNStruct *)globalcontext)->pulse->nobs] = sin(2*M_PI*freqs[startpos+i]*time)*SWVec[k];
+
+	      }
+	    }
+	  }
+
+	  for(int pl = 0; pl < ((MNStruct *)globalcontext)->numFitSWPL; pl++){
+	    double SWAmp=Cube[pcount];
+	    pcount++;
+	    double SWSlope=Cube[pcount];
+	    pcount++;
+
+	    double Tspan = maxtspan;
+	    // Frequency of 1/1yr
+	    double f1yr = 1.0/3.16e7;
+
+	    SWAmp=pow(10.0, SWAmp);
+	    if(((MNStruct *)globalcontext)->SWPriorType ==1) { uniformpriorterm += log(SWAmp); }
+	    for (int i=0; i<FitSWCoeff/2; i++){
+	      double rho = (SWAmp*SWAmp)*pow(f1yr,(-3)) * pow(freqs[startpos+i]*365.25,(-SWSlope))/(maxtspan*24*60*60);
+	      powercoeff[startpos+i]+=rho;
+	      powercoeff[startpos+i+FitSWCoeff/2]+=rho;
+	    }
+	  }
+
+	  for (int i=0; i<FitSWCoeff/2; i++){
+	    freqdet=freqdet+2*log(powercoeff[startpos+i]);
+	  }
+	  startpos+=FitSWCoeff;
 
 	}
 
@@ -1560,11 +1612,6 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	if(((MNStruct *)globalcontext)->FitSolarWind == 1){
 
 		for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-
-		  //printf("ne-sw value %g \n",((MNStruct *)globalcontext)->pulse->ne_sw);
-		  //printf("ne-sw*tdis2 value %g \n",((MNStruct *)globalcontext)->pulse->ne_sw*((MNStruct *)globalcontext)->pulse->obsn[o].tdis2);
-		  //printf("SolarWind(TempoNest) value %g \n",SolarWind);
-
 			Resvec[o]-= (SolarWind-((MNStruct *)globalcontext)->pulse->ne_sw)*((MNStruct *)globalcontext)->pulse->obsn[o].tdis2;
 		}
 	}
@@ -1903,6 +1950,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 
 	delete[] DMVec;
 	delete[] ScatVec;
+	delete[] SWVec;
 	delete[] WorkCoeff;
 	delete[] WorkCoeff2;
 	for(int i=0; i < ((MNStruct *)globalcontext)->EPolTerms; i++) delete[] EFAC[i];

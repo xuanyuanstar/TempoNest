@@ -2072,6 +2072,7 @@ void StoreTMatrix(double *TotalMatrix, void *context){
 	int FitRedCoeff=2*(((MNStruct *)context)->numFitRedCoeff);
 	int FitDMCoeff=2*(((MNStruct *)context)->numFitDMCoeff);
 	int FitScatCoeff=2*(((MNStruct *)context)->numFitScatCoeff);
+	int FitSWCoeff=2*(((MNStruct *)context)->numFitSWCoeff);	
 	int FitBandCoeff=2*(((MNStruct *)context)->numFitBandNoiseCoeff);
 	int FitGroupNoiseCoeff = 2*((MNStruct *)context)->numFitGroupNoiseCoeff;
 
@@ -2166,6 +2167,31 @@ void StoreTMatrix(double *TotalMatrix, void *context){
 	  startpos += FitScatCoeff;
 	  delete[] ScatVec;
 	}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////Solar Wind variations ////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+	if(((MNStruct *)context)->incSW > 0) {
+	  double *SWVec=new double[((MNStruct *)context)->pulse->nobs];
+	  for(int o=0;o<((MNStruct *)context)->pulse->nobs; o++)
+	    SWVec[o]=((MNStruct *)context)->pulse->obsn[o].tdis2 / ((MNStruct *)context)->pulse->ne_sw; // Solar wind delay of unit ne_sw
+
+	  for(int i=0;i<FitSWCoeff/2;i++){
+	    freqs[startpos+i]=((MNStruct *)context)->sampleFreq[startpos/2 - ((MNStruct *)context)->incFloatRed+i]/maxtspan;
+	    freqs[startpos+i+FitSWCoeff/2]=freqs[startpos+i];
+
+	    for(int k=0;k<((MNStruct *)context)->pulse->nobs;k++){
+	      double time=(double)((MNStruct *)context)->pulse->obsn[k].bat;
+	      TotalMatrix[k + (i+TimetoMargin+startpos)*((MNStruct *)context)->pulse->nobs]=cos(2*M_PI*freqs[startpos+i]*time)*SWVec[k];
+	      TotalMatrix[k + (i+FitSWCoeff/2+TimetoMargin+startpos)*((MNStruct *)context)->pulse->nobs] = sin(2*M_PI*freqs[startpos+i]*time)*SWVec[k];
+	      //printf("tot Mat = %lg\n", TotalMatrix[k + (i+TimetoMargin+startpos)*((MNStruct *)context)->pulse->nobs]);
+	    }
+	  }
+	  startpos += FitSWCoeff;
+	  delete[] SWVec;
+	}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////Band DM/////////////////////////////////////////////////////////////
@@ -2417,6 +2443,7 @@ void getArraySizeInfo(void *context){
 	int FitRedCoeff=2*(((MNStruct *)context)->numFitRedCoeff);
 	int FitDMCoeff=2*(((MNStruct *)context)->numFitDMCoeff);
 	int FitScatCoeff=2*(((MNStruct *)context)->numFitScatCoeff);
+	int FitSWCoeff=2*(((MNStruct *)context)->numFitSWCoeff);	
 	int FitBandNoiseCoeff=2*(((MNStruct *)context)->numFitBandNoiseCoeff);
 	int FitGroupNoiseCoeff = 2*((MNStruct *)context)->numFitGroupNoiseCoeff;
 
@@ -2438,6 +2465,7 @@ void getArraySizeInfo(void *context){
 	if(((MNStruct *)context)->incRED != 0 || ((MNStruct *)context)->incGWB == 1)totCoeff+=FitRedCoeff;
 	if(((MNStruct *)context)->incDM != 0)totCoeff+=FitDMCoeff;
 	if(((MNStruct *)context)->incScat != 0)totCoeff+=FitScatCoeff;
+	if(((MNStruct *)context)->incSW != 0)totCoeff+=FitSWCoeff;
 	if(((MNStruct *)context)->incBandNoise > 0)totCoeff+= ((MNStruct *)context)->incBandNoise*FitBandNoiseCoeff;
 	if(((MNStruct *)context)->incNGJitter >0)totCoeff+=((MNStruct *)context)->numNGJitterEpochs;
 	if(((MNStruct *)context)->incNGSJitter >0)totCoeff+=((MNStruct *)context)->numNGSJitterEpochs;
