@@ -3339,9 +3339,9 @@ extern "C" int graphicalInterface(int argc, char **argv,
 		
 		Settings settings(ndims, NDerived);
 		   settings.nlive         = nlive;
-		   settings.num_repeats   = settings.nDims*5;
+		   settings.num_repeats   = settings.nDims*2;
 		   settings.do_clustering = false;
-		   settings.precision_criterion = 1e-3;
+		   settings.precision_criterion = 0.005;
 		   settings.logzero       = -1e30;
 		   settings.base_dir      = dir;
 		   settings.file_root     = sfn;
