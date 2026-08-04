@@ -1797,7 +1797,7 @@ double TNm2(longdouble mf, longdouble sini, longdouble m1)
 
 void TNprintGlitch(pulsar psr)
 {
-  double glep1z,glep2z,glepe;
+  double glep1z,glep2z,glepe, glep;
   int iph;
   double fph;
   double dfof,edfof;
@@ -1806,16 +1806,16 @@ void TNprintGlitch(pulsar psr)
   iph = fortran_nint((double)psr.param[param_glph].val[0]);
   fph = (double)psr.param[param_glph].val[0]-iph;
 
-  glep1z=(double)psr.param[param_glep].val[0]+TNdglep(psr,0,fph);
-  if (fph >= 0)
-    glep2z=(double)psr.param[param_glep].val[0]+TNdglep(psr,0,fph-1);
-  else
-    glep2z=(double)psr.param[param_glep].val[0]+TNdglep(psr,0,fph+1);
+  //glep1z=(double)psr.param[param_glep].val[0]+TNdglep(psr,0,fph);
+  
+  //if (fph >= 0)
+  //  glep2z=(double)psr.param[param_glep].val[0]+TNdglep(psr,0,fph-1);
+  //else
+  //  glep2z=(double)psr.param[param_glep].val[0]+TNdglep(psr,0,fph+1);
 
-  //  glepe=ferr(NPAR1+(i-1)*NGLP+1)/
   glepe = (double)psr.param[param_glph].err[0]/(double)(fabs(psr.param[param_glf0].val[0]+psr.param[param_glf0d].val[0])*86400.0);
 
-  printf("MJD for zero glitch phase = %.6f or %.6f, error = %g\n",glep1z,glep2z,glepe);
+  //printf("MJD for zero glitch phase = %.6f or %.6f, error = %g\n",glep1z,glep2z,glepe);
 
   dfof = (double)(psr.param[param_glf0].val[0]/psr.param[param_f].val[0]);
   edfof = (double)(psr.param[param_glf0].err[0]/psr.param[param_f].val[0]);
