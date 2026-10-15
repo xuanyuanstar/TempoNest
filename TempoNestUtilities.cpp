@@ -232,12 +232,6 @@ void readphyslive(std::string longname, int ndim, double **paramarray, int sampl
 
 	}
 	summaryfile.close();
-
-	//void *tempcontext;
-	//double *DerivedParams=new double[1];
-	//int np = 1;
-	//double like = NewLRedMarginLogLike(ndim, TempCube, np, DerivedParams, tempcontext);
-
 }
 
 void read_ddgr(std::string longname, int ndim, int sampler,  void *context){
@@ -505,9 +499,6 @@ void readsummary(pulsar *psr, std::string longname, int ndim, void *context, lon
 
 	}
 
-	
-		
-
 	formBatsAll(((MNStruct *)context)->pulse,1);           // Form Barycentric arrival times 
 	//printf("formed bats \n");
 	formResiduals(((MNStruct *)context)->pulse,1,1);       //Form residuals 
@@ -544,18 +535,16 @@ void readsummary(pulsar *psr, std::string longname, int ndim, void *context, lon
 }
 
 
-
+// Get the number of jitter epochs
 void getNGJitterMatrixEpochs(pulsar *pulse, int &NumEpochs){
 
-
-	// count ECORR values
-	if(pulse->nTNECORR > 0){
-		for(int i=0; i<pulse->nTNECORR; i++){
-			printf("\nIncluding ECORR value for backend %s: %g mus", \
-					pulse->TNECORRFlagVal[i], pulse->TNECORRVal[i]);
-
-		}
-	}
+  // count ECORR values
+  //	if(pulse->nTNECORR > 0){
+  //		for(int i=0; i<pulse->nTNECORR; i++){
+  //    		printf("\nIncluding ECORR value for backend %s: %g mus", \
+  //				pulse->TNECORRFlagVal[i], pulse->TNECORRVal[i]);
+  //	}
+  //	}
 
 
 	// find number of epochs (default dt= 10 s)
@@ -622,14 +611,10 @@ void getNGJitterMatrixEpochs(pulsar *pulse, int &NumEpochs){
 		}
 	}
 
-
-	if (nepoch > 0){
-		printf("\n\nUsing %d epochs for PSR %s\n\n", nepoch, pulse->name);
-	}
-
+	//if (nepoch > 0){
+	//	printf("\n\nUsing %d epochs for PSR %s\n\n", nepoch, pulse->name);
+	//}
 	NumEpochs=nepoch;
-
-
 }
 
 void getNGSJitterMatrixEpochs(pulsar *pulse, int &NumEpochs){
@@ -710,9 +695,9 @@ void getNGSJitterMatrixEpochs(pulsar *pulse, int &NumEpochs){
 	}
 
 
-	if (nepoch > 0){
-		printf("\n\nUsing %d epochs for PSR %s\n\n", nepoch, pulse->name);
-	}
+	//if (nepoch > 0){
+	//	printf("\n\nUsing %d epochs for PSR %s\n\n", nepoch, pulse->name);
+	//}
 
 	NumEpochs=nepoch;
 
@@ -721,19 +706,17 @@ void getNGSJitterMatrixEpochs(pulsar *pulse, int &NumEpochs){
 
 
 
-
+// Get the quantization (design) matrix of jitter
 void getNGJitterMatrix(pulsar *pulse, double **JitterMatrix, int &NumEpochs){
 
-
 	// count ECORR values
-	if(pulse->nTNECORR > 0){
-		for(int i=0; i<pulse->nTNECORR; i++){
-			printf("\nIncluding ECORR value for backend %s: %g mus", \
-					pulse->TNECORRFlagVal[i], pulse->TNECORRVal[i]);
+	//if(pulse->nTNECORR > 0){
+	//	for(int i=0; i<pulse->nTNECORR; i++){
+	//		printf("\nIncluding ECORR value for backend %s: %g mus", \
+    //				pulse->TNECORRFlagVal[i], pulse->TNECORRVal[i]);
 
-		}
-	}
-
+  //		}
+  //	}
 
 	// find number of epochs (default dt= 10 s)
 	int *Processed = new int[pulse->nobs];
@@ -800,10 +783,9 @@ void getNGJitterMatrix(pulsar *pulse, double **JitterMatrix, int &NumEpochs){
 	}
 
 
-	if (nepoch > 0){
-		printf("\n\nUsing %d epochs for PSR %s\n\n", nepoch, pulse->name);
-	}
-
+	//if (nepoch > 0){
+	//	printf("\n\nUsing %d epochs for PSR %s\n\n", nepoch, pulse->name);
+	//}
 	NumEpochs=nepoch;
 
 
@@ -846,11 +828,11 @@ void getNGJitterMatrix(pulsar *pulse, double **JitterMatrix, int &NumEpochs){
 							if ((double)pulse->obsn[i].bat > satmin && \
 									(double)pulse->obsn[i].bat < satmax){
 								Processed[i] = 1;
-								JitterMatrix[i][nepoch] = 1;
+								JitterMatrix[i][nepoch] = 1.0;
 								in++;
 							}
 							else{
-								JitterMatrix[i][nepoch] = 0;
+								JitterMatrix[i][nepoch] = 0.0;
 							}
 						}
 					}
@@ -869,10 +851,6 @@ void getNGJitterMatrix(pulsar *pulse, double **JitterMatrix, int &NumEpochs){
 			}
 		}
 	}
-
-
-
-
 }
 
 
@@ -954,9 +932,9 @@ void getNGSJitterMatrix(pulsar *pulse, double **JitterMatrix, int &NumEpochs){
 	}
 
 
-	if (nepoch > 0){
-		printf("\n\nUsing %d epochs for PSR %s\n\n", nepoch, pulse->name);
-	}
+	//if (nepoch > 0){
+	//		printf("\n\nUsing %d epochs for PSR %s\n\n", nepoch, pulse->name);
+	//}
 
 	NumEpochs=nepoch;
 
@@ -1107,370 +1085,6 @@ void getCustomDMatrix(pulsar *pulse, int *MarginList, int **TempoFitNums, int *T
 		  pulse[0].fitfdJump[TempofdJumpNums[i]]=1;
 		}
 }
-/*
-void getPhysDVector(void *context, double **TNDM, int Nobs, int *TimingGradientSigns){
-	
-	double pdParamDeriv[MAX_PARAMS], dMultiplication;
-
-
-	//In order to get design matrix in physical units, need to use update parameters function.  Current fit values/errors are backed up in TempoPriors. Set value/error to 0,1 then call update params.
-	//The new error will be the scaling required for the design matrix, then set values/errors back to old values.
-
-	//long double newF0 = 3.5*(((MNStruct *)context)->LDpriors[1][1]) + (((MNStruct *)context)->LDpriors[1][0]);
-	//((MNStruct *)context)->pulse->param[((MNStruct *)context)->TempoFitNums[1][0]].val[((MNStruct *)context)->TempoFitNums[1][1]] = newF0;
-
-	fastformBatsAll(((MNStruct *)context)->pulse,((MNStruct *)context)->numberpulsars);       
-	formResiduals(((MNStruct *)context)->pulse,((MNStruct *)context)->numberpulsars,0);       
-
-
-
-	int numToFit = ((MNStruct *)context)->numFitTiming + ((MNStruct *)context)->numFitJumps;
-	double *newVals = new double[numToFit]();
-	double *newErrs = new double[numToFit]();
-	double *oldErrs = new double[numToFit]();
-
-	int fitcount=0;
-	oldErrs[fitcount] = 0;
-	fitcount++;
-	for (int p=0;p<MAX_PARAMS;p++) {
-		for (int k=0;k<((MNStruct *)context)->pulse->param[p].aSize;k++){
-			if(((MNStruct *)context)->pulse->param[p].fitFlag[k] == 1 && p != param_dmmodel){
-				//printf("Old Error for: %s %g\n",((MNStruct *)context)->pulse->param[p].shortlabel[k], (double)((MNStruct *)context)->pulse->param[p].err[k]);
-				oldErrs[fitcount] = (double)((MNStruct *)context)->pulse->param[p].err[k];
-				newErrs[fitcount] = 1;
-				fitcount++;
-	    		}
-		}
-	}
-
-	updateParameters(((MNStruct *)context)->pulse, 0,newVals,newErrs);
-
-
-
-	for (int p=0;p<numToFit;p++) {
-		TimingGradientSigns[p] = 1;
-	}
-
-	fitcount=0;
-	newVals[fitcount] = 1;
-	fitcount++;
-	for (int p=0;p<MAX_PARAMS;p++) {
-		for (int k=0;k<((MNStruct *)context)->pulse->param[p].aSize;k++){
-			if(((MNStruct *)context)->pulse->param[p].fitFlag[k] == 1 && p != param_dmmodel){
-				//printf("Scaling factor for: %s %g\n",((MNStruct *)context)->pulse->param[p].shortlabel[k], (double)((MNStruct *)context)->pulse->param[p].err[k]);
-				newVals[fitcount] =  (double)((MNStruct *)context)->pulse->param[p].err[k];
-				//printf("Resetting to old error: %g\n",oldErrs[fitcount]);
-				((MNStruct *)context)->pulse->param[p].err[k] = oldErrs[fitcount];
-				fitcount++;
-	    		}
-		}
-	}
-
-	for(int i = 0; i <  ((MNStruct *)context)->numFitJumps; i++){
-		newVals[((MNStruct *)context)->numFitTiming+i] = 1;
-	}
-	
-	int DMparamnum=3;
-	double averageDMDelay = 0;
-	
-	for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {
-		FITfuncs(((MNStruct *)context)->pulse->obsn[i].bat - ((MNStruct *)context)->pulse->param[param_pepoch].val[0], pdParamDeriv, numToFit, ((MNStruct *)context)->pulse, i,0);
-		for(int j=0; j<numToFit; j++) {
-			double PriorFac = (double)((MNStruct *)context)->LDpriors[j][1];
-	//		printf("CDML: %i %i %i %g %g %g\n", i,j,numToFit,pdParamDeriv[j], pdParamDeriv[j]/newVals[j], (pdParamDeriv[j]/newVals[j])*PriorFac);
-			TNDM[i][j]= pdParamDeriv[j];//(pdParamDeriv[j]/newVals[j])*PriorFac;
-//			if(j< 20){printf("%i %i %g \n", i, j, TNDM[i][j]);}
-			if(j==DMparamnum){averageDMDelay += TNDM[i][j];}
-		} 
-	} 
-
-	averageDMDelay/=((MNStruct *)context)->pulse->nobs;
-	printf("AverageDMDelay is : %g\n", averageDMDelay);
-//	if(((MNStruct *)context)->doLinear==1){
-//		for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {
-//			TNDM[i][DMparamnum] -= averageDMDelay;
-//		}
-//	}
-
-	if(((MNStruct *)context)->doLinear==0){
-		for(int p= 1; p < ((MNStruct *)context)->numFitTiming; p++){
-			double zeroval=	TNDM[0][p];
-			for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {
-				TNDM[i][p] = TNDM[i][p]-zeroval;
-			}
-		}
-	}
-
-	
-
-
-
-	double *oldRes = new double[((MNStruct *)context)->pulse->nobs];
-	for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {	
-		oldRes[i] = (double)((MNStruct *)context)->pulse->obsn[i].residual;
-	}
-
-	for(int p= 1; p < ((MNStruct *)context)->numFitTiming; p++){
-
-		fastformBatsAll(((MNStruct *)context)->pulse,((MNStruct *)context)->numberpulsars);       
-		formResiduals(((MNStruct *)context)->pulse,((MNStruct *)context)->numberpulsars,0);       
-
-
-		double nobatsSTD1 = 0;
-		double nobatsSTD2 = 0;
-
-		long double newVal = ((MNStruct *)context)->LDpriors[p][1] + ((MNStruct *)context)->LDpriors[p][0];
-		long double oldVal = ((MNStruct *)context)->LDpriors[p][0];
-		((MNStruct *)context)->pulse->param[((MNStruct *)context)->TempoFitNums[p][0]].val[((MNStruct *)context)->TempoFitNums[p][1]] = newVal;
-
-
-//		fastformBatsAll(((MNStruct *)context)->pulse,((MNStruct *)context)->numberpulsars);      
-		formResiduals(((MNStruct *)context)->pulse,((MNStruct *)context)->numberpulsars,0);      
-		double sign = 0;
-		double DMSub = 0;
-		if(strcasecmp(((MNStruct *)context)->pulse[0].param[p].shortlabel[0],"DM")!=0 || strcasecmp(((MNStruct *)context)->pulse[0].param[p].shortlabel[0],"DMX_001")!=0){
-			//printf("This is a DM parameter %i\n",p);
-			//DMSub = averageDMDelay;
-		}
-		double zeroval= TNDM[0][p];
-		printf("paramter %i \n", p);
-		for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {	
-			double PriorFac = (double)((MNStruct *)context)->LDpriors[p][1];
-			TNDM[i][p] = ((TNDM[i][p]-zeroval)/newVals[p])*PriorFac;
-			sign += double(((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i])*(TNDM[i][p]-(TNDM[0][p]));
-
-			nobatsSTD1 += (((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i])*(((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i]);
-			nobatsSTD2 += TNDM[i][p]*TNDM[i][p];
-			//TNDM[i][p] = (double)((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i];
-		}
-
-                double withbatsSTD1 = 0;
-                double withbatsSTD2 = 0;
-
-		fastformBatsAll(((MNStruct *)context)->pulse,((MNStruct *)context)->numberpulsars);       
-		formResiduals(((MNStruct *)context)->pulse,((MNStruct *)context)->numberpulsars,0);       
-
-		double average = 0;
-		double sign2 = 0;
-		for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {
-
-			if(p == 1 || p == 2){printf("Vecs: %i %i %.16g %.16g %.16g %.16g %.16g\n", p, i, (double)((MNStruct *)context)->pulse->obsn[i].bat, (double)((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i], (double)((MNStruct *)context)->pulse->obsn[i].toaErr, TNDM[i][p], (TNDM[i][p]-(TNDM[0][p])));}
-
-	
-			//if(i<1000000000){printf("Vecs: %i %i %.16g %.16g %.16g\n", p, i, (double)((MNStruct *)context)->pulse->obsn[i].bat, (double)((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i],TNDM[i][p]);}
-			sign2 += double(((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i])*(TNDM[i][p]-(TNDM[0][p]));
-			withbatsSTD1 += (((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i])*(((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i]);
-			withbatsSTD2 += TNDM[i][p]*TNDM[i][p];
-			average += TNDM[i][p];
-			//TNDM[i][p] = (double)((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i];
-		}
-
-		printf("BATS Ratio: %i %s %g %g \n", p, ((MNStruct *)context)->pulse->param[((MNStruct *)context)->TempoFitNums[p][0]].shortlabel[0], nobatsSTD1/withbatsSTD1, withbatsSTD2/nobatsSTD2);
-
-
-		printf("signs? %i %g %g %g\n", p, sign, sign2, average/((MNStruct *)context)->pulse->nobs);
-
-//		printf("Sign? %i %g %g\n", p, sign, sign/fabs(sign));
-		TimingGradientSigns[p] = int(sign2/fabs(sign2));
-		((MNStruct *)context)->pulse->param[((MNStruct *)context)->TempoFitNums[p][0]].val[((MNStruct *)context)->TempoFitNums[p][1]] = oldVal;
-
-		if(fabs(1-(nobatsSTD1/withbatsSTD1)) > 0.01 && ((MNStruct *)context)->doLinear==0){
-
-			printf("param %i changes bats alot, using residuals to form gradient \n", p);
-			for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {
-				TNDM[i][p] = (double)((MNStruct *)context)->pulse->obsn[i].residual-oldRes[i];
-			}
-		}
-		else{
-			printf("param %i only changes residuals, using design matrix for gradient \n",p);
-			if(sign2 < 0){
-				for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {	
-					TNDM[i][p] *=-1;
-				}
-			}
-		}	
-		
-	}
-
-	for(int p = 0; p < ((MNStruct *)context)->numFitJumps; p++){
-
-
-		for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {
-//			printf("Jumps in TNDM: %i %i %g %g \n", p, i,  (double)((MNStruct *)context)->LDpriors[p+((MNStruct *)context)->numFitTiming][1], TNDM[i][p+((MNStruct *)context)->numFitTiming]);
-			TNDM[i][p+((MNStruct *)context)->numFitTiming] = ((MNStruct *)context)->LDpriors[p+((MNStruct *)context)->numFitTiming][1]*TNDM[i][p+((MNStruct *)context)->numFitTiming];
-		}
-	
-
-	}
-	printf("do linear is: %i \n", ((MNStruct *)context)->doLinear);
-	if(((MNStruct *)context)->doLinear==2){
-
-		double *TempTNDM = new double[((MNStruct *)context)->pulse->nobs*numToFit]();
-		double *NU = new double[((MNStruct *)context)->pulse->nobs*(numToFit)]();
-		double *UU = new double[(numToFit)*(numToFit)];
-
-		for(int j=0;j<((MNStruct *)context)->pulse->nobs;j++){
-			for(int k=0;k<numToFit;k++){
-			
-				if(k==0){TNDM[j][k] = ((MNStruct *)context)->ReferencePeriod;}
-				TempTNDM[j + k*((MNStruct *)context)->pulse->nobs] = TNDM[j][k];
-			}
-		}
-
-	//	vector_dgesvd2(TempTNDM, ((MNStruct *)context)->pulse->nobs, numToFit-1, S, U, VT);
-		vector_dgesvd(TempTNDM,((MNStruct *)context)->pulse->nobs, numToFit);
-
-		for(int j=0;j<((MNStruct *)context)->pulse->nobs;j++){
-			for(int k=0;k<numToFit;k++){
-				NU[j + k*((MNStruct *)context)->pulse->nobs] = TempTNDM[j + k*((MNStruct *)context)->pulse->nobs]/pow(((MNStruct *)context)->pulse->obsn[j].toaErr*pow(10.0,-6),2);
-			}
-		}
-
-		double *dNU= new double[numToFit];
-		double *ML= new double[numToFit];
-		double *residuals = new double[((MNStruct *)context)->pulse->nobs];
-
-		 for(int j=0;j<((MNStruct *)context)->pulse->nobs;j++){
-			residuals[j] = ((MNStruct *)context)->pulse->obsn[j].residual;
-		}
-
-		vector_dgemm(NU, TempTNDM, UU, ((MNStruct *)context)->pulse->nobs, numToFit, ((MNStruct *)context)->pulse->nobs, numToFit, 'T', 'N');
-		vector_dgemv(NU, residuals, dNU, ((MNStruct *)context)->pulse->nobs, numToFit, 'T');
-
-		double Margindet = 0;
-		int info = 0;
-	        vector_dpotrfInfo(UU, numToFit, Margindet, info);
-                vector_dpotri(UU,numToFit);
-
-		vector_dgemv(UU, dNU, ML, numToFit, numToFit, 'N');
-		vector_dgemv(TempTNDM, ML, residuals, ((MNStruct *)context)->pulse->nobs, numToFit, 'N');
-
-		for(int j=0;j<((MNStruct *)context)->pulse->nobs;j++){
-			 ((MNStruct *)context)->pulse->obsn[j].residual -= residuals[j];
-		}	
-
-		double *ErrScale = new double[numToFit];
-
-		for(int k=0;k<numToFit;k++){
-			printf("ErrScale: %i %g  %g %g \n", k, sqrt(UU[k + k*(numToFit)]), ML[k], ML[k]/sqrt(UU[k + k*(numToFit)]));
-			ErrScale[k] = sqrt(UU[k + k*(numToFit)]);
-		}
-
-		for(int j=0;j<((MNStruct *)context)->pulse->nobs;j++){
-			for(int k=0;k<numToFit;k++){
-//				if(k==0)printf("Lin2: %i %i %g %g %g\n", j, k, TNDM[j][k], TempTNDM[j + k*((MNStruct *)context)->pulse->nobs], TempTNDM[j + k*((MNStruct *)context)->pulse->nobs]*ErrScale[k]);
-				TNDM[j][k]=TempTNDM[j + k*((MNStruct *)context)->pulse->nobs]*ErrScale[k];
-			}
-		}
-
-		for(int k=1;k<numToFit;k++){
-			double zeroval = TNDM[0][k];
-			for(int j=0;j<((MNStruct *)context)->pulse->nobs;j++){
-//				TNDM[j][k] -= zeroval;
-			}
-		}
-
-		delete[]TempTNDM;
-		delete[] ErrScale;
-	
-		
-	}
-
-
-
-
-
-	for(int j=0; j<numToFit; j++) {
-		double dsum = 0;
-		double gsum = 0;
-		for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {	
-			dsum += TNDM[i][j]*TNDM[i][j];
-			gsum+= TNDM[i][j]*(((MNStruct *)context)->pulse->obsn[i].residual)/(((MNStruct *)context)->pulse->obsn[i].toaErr*pow(10.0, -6))/(((MNStruct *)context)->pulse->obsn[i].toaErr*pow(10.0, -6));
-		}
-		printf("TOA Hess and grad: %i %g %g \n", j, dsum, gsum);
-	}
-
-	delete[] newVals;
-	delete[] newErrs;
-	delete[] oldErrs;
-	delete[] oldRes;
-}
-*/
-/*
-void UpdatePhysDVector(void *context, double **TNDM, int Nobs){
-	
-	double pdParamDeriv[MAX_PARAMS], dMultiplication;
-
-
-	//In order to get design matrix in physical units, need to use update parameters function.  Current fit values/errors are backed up in TempoPriors. Set value/error to 0,1 then call update params.
-	//The new error will be the scaling required for the design matrix, then set values/errors back to old values.
-
-	//long double newF0 = 3.5*(((MNStruct *)context)->LDpriors[1][1]) + (((MNStruct *)context)->LDpriors[1][0]);
-	//((MNStruct *)context)->pulse->param[((MNStruct *)context)->TempoFitNums[1][0]].val[((MNStruct *)context)->TempoFitNums[1][1]] = newF0;
-
-
-
-	int numToFit = ((MNStruct *)context)->numFitTiming + ((MNStruct *)context)->numFitJumps;
-	double *newVals = new double[numToFit]();
-	double *newErrs = new double[numToFit]();
-
-	for(int p= 0; p < numToFit; p++){
-		newErrs[p] = 1;
-	}
-
-	updateParameters(((MNStruct *)context)->pulse, 0,newVals,newErrs);
-
-
-	int fitcount=1;
-
-	for (int p=0;p<MAX_PARAMS;p++) {
-		for (int k=0;k<((MNStruct *)context)->pulse->param[p].aSize;k++){
-			if(((MNStruct *)context)->pulse->param[p].fitFlag[k] == 1 && p != param_dmmodel){
-				//printf("Scaling factor for: %s %g\n",((MNStruct *)context)->pulse->param[p].shortlabel[k], (double)((MNStruct *)context)->pulse->param[p].err[k]);
-				newVals[fitcount] =  (double)((MNStruct *)context)->pulse->param[p].err[k];
-				fitcount++;
-	    		}
-		}
-	}
-
-	
-	for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {
-		FITfuncs(((MNStruct *)context)->pulse->obsn[i].bat - ((MNStruct *)context)->pulse->param[param_pepoch].val[0], pdParamDeriv, numToFit, ((MNStruct *)context)->pulse, i,0);
-		for(int j=1; j<((MNStruct *)context)->numFitTiming; j++) {
-			TNDM[i][j]= pdParamDeriv[j];
-		} 
-	} 
-
-	for(int p= 1; p < ((MNStruct *)context)->numFitTiming; p++){
-		double zeroval=	TNDM[0][p];
-		for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {
-			TNDM[i][p] = TNDM[i][p]-zeroval;
-		}
-	}
-
-
-
-
-	for(int p= 1; p < ((MNStruct *)context)->numFitTiming; p++){
-
-		int sign = ((MNStruct *)context)->TimingGradientSigns[p];
-		double PriorFac = (double)((MNStruct *)context)->LDpriors[p][1];
-		PriorFac *= sign/newVals[p];
-		//printf("updating %i %i %g %g \n", p, sign, newVals[p], PriorFac);
-
-		for(int i=0; i < ((MNStruct *)context)->pulse->nobs; i++) {	
-
-			TNDM[i][p] = TNDM[i][p]*PriorFac;
-
-		}
-	}
-
-	delete[] newVals;
-	delete[] newErrs;
-
-}
-
-*/
 
 void getCustomDVectorLike(void *context, double *TNDM, int Nobs, int TimeToMargin, int TotalSize){
 
@@ -2060,9 +1674,6 @@ void StoreTMatrix(double *TotalMatrix, void *context){
 		vector_dgesvd(TotalMatrix,((MNStruct *)context)->pulse->nobs, TimetoMargin);
 	}
 		
-
-
-
 //////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////////////Set up Coefficients///////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////  
@@ -2078,12 +1689,9 @@ void StoreTMatrix(double *TotalMatrix, void *context){
 
 	int totCoeff=((MNStruct *)context)->totCoeff;
 
-
-
 /////////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////Red Noise///////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
-
 
 	double *freqs = new double[totCoeff];
 	double *DMVec=new double[((MNStruct *)context)->pulse->nobs];
@@ -2099,26 +1707,19 @@ void StoreTMatrix(double *TotalMatrix, void *context){
 
 		}
 	
-
 		for(int i=0;i<FitRedCoeff/2;i++){
 			for(int k=0;k<((MNStruct *)context)->pulse->nobs;k++){
 				double time=(double)((MNStruct *)context)->pulse->obsn[k].bat;
 				TotalMatrix[k + (i+TimetoMargin+startpos)*((MNStruct *)context)->pulse->nobs]=cos(2*M_PI*freqs[i]*time);
 				TotalMatrix[k + (i+FitRedCoeff/2+TimetoMargin+startpos)*((MNStruct *)context)->pulse->nobs] = sin(2*M_PI*freqs[i]*time);
-
-
 			}
-		}
-			
-			    
+		}						    
 		startpos += FitRedCoeff;
-
 	}
 
 /////////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////DM Variations////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////// 
-
 
 	if(((MNStruct *)context)->incDM > 0){
 
@@ -2283,11 +1884,12 @@ void StoreTMatrix(double *TotalMatrix, void *context){
 		
 
 		for (int i=0;i<((MNStruct *)context)->pulse->nobs;i++){
+		  NGJitterSysFlags[i] = -1;
 			for (int j=0;j<((MNStruct *)context)->pulse->obsn[i].nFlags;j++){
 				for (int k=0;k<((MNStruct *)context)->pulse->nTNECORR;k++){
 					if (strcmp(((MNStruct *)context)->pulse->obsn[i].flagID[j], ((MNStruct *)context)->pulse->TNECORRFlagID[k])==0){
 						if (strcmp(((MNStruct *)context)->pulse->obsn[i].flagVal[j],((MNStruct *)context)->pulse->TNECORRFlagVal[k])==0){
-							NGJitterSysFlags[i] = k;
+						  NGJitterSysFlags[i] = k; // The jitter system flag of the ith TOA is from the kth TNECORR
 							//printf("NGFLag? %i %i %s \n", i, k, psr->TNECORRFlagVal[k]);
 						}
 					}
@@ -2295,39 +1897,50 @@ void StoreTMatrix(double *TotalMatrix, void *context){
 			}
 		}
 
-
+		// JitterMatrix is the quantization (design) matrix of jitter
+		// Rows correspond to individual TOAs
+		// Columns correspond to unique observing epochs, Jitter Epochs
+		// Each row has a single 1 in the column corresponding to that TOA's epoch, and zeros elsewhere
 		getNGJitterMatrix(((MNStruct *)context)->pulse, NGJitterMatrix, NumNGEpochs);
 
-		int *NGJitterEpochFlags = new int[NumNGEpochs];
+		int *NGJitterFlags = new int[NumNGEpochs];
 
 		for(int i =0; i < NumNGEpochs; i++){
 			for(int j=0; j < ((MNStruct *)context)->pulse->nobs; j++){
 				if(NGJitterMatrix[j][i] != 0) {
-					NGJitterEpochFlags[i]=NGJitterSysFlags[j];
+					NGJitterFlags[i]=NGJitterSysFlags[j];
 				}
 			}
 		}
 
-		((MNStruct *)context)->NGJitterSysFlags=NGJitterEpochFlags;
+		((MNStruct *)context)->NGJitterEpochFlags=NGJitterSysFlags;
+		((MNStruct *)context)->NGJitterSysFlags=NGJitterFlags;
 
+		//FILE *f;
+		//f=fopen("FLAG.txt","wt");
+		//for(int i=0; i<((MNStruct *)context)->pulse->nobs; i++){
+		  //fprintf(f,"%i ", ((MNStruct *)context)->NGJitterEpochFlags[i]);
+		  //}
+		//fclose(f);
+		//exit(0);
+
+		// Add JitterMatrix value to the total design matrix (already including the jitter epoch dimensions)
+		if(((MNStruct *)context)->KJitter != 1){
 		for(int k=0;k<((MNStruct *)context)->pulse->nobs;k++){
 			for(int i=0; i < ((MNStruct *)context)->numNGJitterEpochs; i++){
 				TotalMatrix[k + (i+TimetoMargin+startpos)*((MNStruct *)context)->pulse->nobs] = NGJitterMatrix[k][i];///sqrt((((MNStruct *)context)->TobsInfo[k]/3600.0));
 			}
 		}
+		}
 
-		delete[] NGJitterSysFlags;
+		//delete[] NGJitterSysFlags;
 		for(int j =0; j < ((MNStruct *)context)->pulse->nobs;  j++){
 			delete[] NGJitterMatrix[j];
 		}
 		delete[]NGJitterMatrix;
-
-
 	}
 
-
         //// ADDING SECORR 
-
 
 	if(((MNStruct *)context)->incNGSJitter > 0){
 
@@ -2467,7 +2080,7 @@ void getArraySizeInfo(void *context){
 	if(((MNStruct *)context)->incScat != 0)totCoeff+=FitScatCoeff;
 	if(((MNStruct *)context)->incSW != 0)totCoeff+=FitSWCoeff;
 	if(((MNStruct *)context)->incBandNoise > 0)totCoeff+= ((MNStruct *)context)->incBandNoise*FitBandNoiseCoeff;
-	if(((MNStruct *)context)->incNGJitter >0)totCoeff+=((MNStruct *)context)->numNGJitterEpochs;
+	if(((MNStruct *)context)->incNGJitter >0 && ((MNStruct *)context)->KJitter != 1)totCoeff+=((MNStruct *)context)->numNGJitterEpochs;
 	if(((MNStruct *)context)->incNGSJitter >0)totCoeff+=((MNStruct *)context)->numNGSJitterEpochs;
 	if(((MNStruct *)context)->incGroupNoise > 0)totCoeff += ((MNStruct *)context)->incGroupNoise*FitGroupNoiseCoeff;
 
@@ -3237,75 +2850,3 @@ void getProfileNoiseLevels(void *context){
 
 	}
 }
-
-
-
-/*
-void GetInterpVectors(void *context){
-
-
-	
-	int Nbin = ((MNStruct *)context)->LargestNBins;
-	long double finalInterpTime = ((MNStruct *)context)->InterpolatedTime;
-	int numtointerpolate = ((MNStruct *)context)->NumToInterpolate;
-
-
-	int *numShapeToSave = new int[((MNStruct *)context)->numProfComponents];
-	int totalShapeToSave = 0;
-	for(int i = 0; i < ((MNStruct *)context)->numProfComponents; i++){
-		totalShapeToSave += ((MNStruct *)context)->numshapecoeff[i];
-	}
-
-	printf("Details: %i %i %.10g %g\n", (int)((MNStruct *)context)->LargestNBins, totalShapeToSave, (double)((MNStruct *)context)->InterpolatedTime, (double)((MNStruct *)context)->ReferencePeriod);
-
-
-
-
-//	((MNStruct *)context)->InterpolatedShapeletsVec = StoredShapeletsVec;
-//	((MNStruct *)context)->InterpolatedJitterProfileVec = StoredShapeletsJitterVec;
-//	((MNStruct *)context)->InterpolatedWidthProfileVec = StoredShapeletsWidthVec;
-	((MNStruct *)context)->NumToInterpolate = numtointerpolate;
-
-	double **FourierProfileData = new double*[((MNStruct *)context)->pulse->nobs];
-	for(int i = 0; i < ((MNStruct *)context)->pulse->nobs; i++){
-		FourierProfileData[i] = new double[((int)((MNStruct *)context)->ProfileInfo[i][1]/2 + 1)*2]();
-	}
-
-	double **StoredFourierShapeletsVec = new double*[numtointerpolate];
-        double **StoredFourierJitterVec = new double*[numtointerpolate];
-
-	int NFBasis = 0;
-	int FindThreshold = 1;
-	FFTProfileData(StoredFourierShapeletsVec, StoredFourierJitterVec, NFBasis, FindThreshold, FourierProfileData, context);
-	
-
-	printf("Using NFBASIS: %i \n", NFBasis);
-//	double **StoredFourierShapeletsVec = new double*[numtointerpolate];
-//	double **StoredFourierJitterVec = new double*[numtointerpolate];
-
-
-	for(int i = 0; i < numtointerpolate; i++){
-		StoredFourierJitterVec[i] = new double[2*NFBasis*totalShapeToSave]();
-		StoredFourierShapeletsVec[i] = new double[2*NFBasis*totalShapeToSave]();
-	}
-
-
-	FindThreshold = 0;
-	FFTProfileData(StoredFourierShapeletsVec, StoredFourierJitterVec, NFBasis, FindThreshold, FourierProfileData, context);
-
-	((MNStruct *)context)->InterpolatedFBasis = StoredFourierShapeletsVec;
-	((MNStruct *)context)->InterpolatedFJitterBasis = StoredFourierJitterVec;
-	((MNStruct *)context)->FourierProfileData = FourierProfileData;
-	((MNStruct *)context)->NFBasis = NFBasis;
-
-
-//	((MNStruct *)context)->InterpolatedMeanProfile = InterpolatedMeanProfile;
-//	((MNStruct *)context)->InterpolatedJitterProfile = InterpolatedJitterProfile;
-//	((MNStruct *)context)->InterpolatedWidthProfile = InterpolatedWidthProfile;
-	
-//	((MNStruct *)context)->MaxShapeAmp = MaxShapeAmp;
-
-		
-}
-
-*/

@@ -111,6 +111,7 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 		double *BandNoiseAmpPrior,
 		double *BandNoiseAlphaPrior,
 		int &incNGJitter,
+		int &KJitter,
                 int &incNGSJitter,
 		int &incGlitch,
 		int &incGlitchTerms,
@@ -480,9 +481,6 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 	parameters.readInto(InterpolateProfile, "InterpolateProfile", InterpolateProfile);
 	parameters.readInto(InterpolatedTime, "InterpolatedTime", InterpolatedTime);
         parameters.readInto(StoreTMatrix, "StoreTMatrix",StoreTMatrix );
-
-
-
         parameters.readInto(strBuf, "root", string("results/Example1"));
         strcpy(root, strBuf.data());
         parameters.readInto(numTempo2its, "numTempo2its", numTempo2its);

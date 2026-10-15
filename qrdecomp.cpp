@@ -85,6 +85,7 @@ void vector_TNqrsolve(double *aIn, double *bIn, double *xOut, int msize, double 
                 Atemp[i] = a[i];
         }
 
+	// SIGMA of dimension of totalsize * totalsize
 	det=0;
 	for(int i =0; i < msize; i++){
 		det += log(fabs(Atemp[i + i*msize]));
@@ -106,100 +107,6 @@ void vector_TNqrsolve(double *aIn, double *bIn, double *xOut, int msize, double 
 	delete[] b;
 	delete[] Atemp;
 }
-
-void TNqrsolve(double **aIn, double *bIn, double *xOut, int msize, double &det, int &info){
-
-	
-	double *a;
-	a = qr_ctof(aIn, msize, msize);
-
-	double **Atemp = new double *[msize];
-	for(int i = 0 ; i <msize; i++){
-		Atemp[i] = new double[msize];
-	}
-
-	double *b = new double[msize];
-	for(int i =0 ; i < msize; i++){
-		b[i]=bIn[i];
-	}
-
-	double* tau = new double[msize];
-
-	int tempinfo=0;
-	tempinfo=geqrf(msize, msize, a, msize, tau);
-
-	if(tempinfo != 0)info=tempinfo;
-	qr_ftoc(a, Atemp, msize, msize);
-	det=0;
-	for(int i =0; i < msize; i++){
-		det += log(fabs(Atemp[i][i]));
-	}
-
-	tempinfo=0;
-	tempinfo=ormqr('L', 'T', msize, 1, msize, a, msize, tau, b, msize);
-	if(tempinfo != 0)info=tempinfo;
-	tempinfo=0;
-	tempinfo=trtrs('U', 'N', 'N', msize, 1, a, msize, b, msize);
-	if(tempinfo != 0)info=tempinfo;
-	for(int i =0; i < msize; i++){
-		xOut[i] = b[i];
-	}
-	//tempinfo = trrfs('U', 'N', 'N', msize, 1, a, msize, bIn, msize, xOut, msize);
-
-	delete[] a;
-	delete[] tau;
-	delete[] b;
-	for(int i = 0 ; i <msize; i++){	
-		delete[] Atemp[i];
-	}
-	delete[] Atemp;
-}
-/*
-
-void qrsolveInfo(double **A, double *B, int msize, int &info)
-{
-
-
-	double *a;
-	char UPLO='U';
-	char side='L';
-	char trans='T';
-	char notrans='N';
-	char diag='N';
-	int NRHS=1;
-	int LWORK = 2*msize + (msize+1)*msize;
-	a = qr_ctof(A, msize, msize); 
-
-
-	double *tau = new double[msize];
-	int *jpvt = new int[msize];
-	double *work = new double[LWORK];
-	double *C = new double[msize];
-	
-
-	for(int i =0; i < msize; i++){
-		tau[i]=0;
-		jpvt[i]=0;
-	}
-
-	info=0;
-	dgeqp3_(&msize, &msize, a, &msize, jpvt, tau, work, &LWORK, &info);
-	info=0;
-	dormqr_(&side, &trans, &msize, &NRHS, &msize, a, &msize, tau, B, &msize, work, &LWORK, &info);
-	info=0;
-	dtrtrs_(&UPLO, &notrans, &diag, &msize, &NRHS, a, &msize, B, &msize, &info);
-	
-	qr_ftoc(a, A, msize, msize);
-
-
- 	delete[] tau;
-	delete[] jpvt;  
-	delete[] work;
-	delete[] C;
-	delete a;
-
-}
-*/
 
 double* qr_ctof(double **in, int rows, int cols)
 {

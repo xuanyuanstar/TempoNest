@@ -28,6 +28,12 @@
 
 #include <vector>
 
+struct NoiseMatrix {
+  int nobs;                // total number of TOAs (sum of block sizes)
+  int NJEpochs;            // number of ECORR blocks
+  int *block_sizes;        // length NJEpochs: size of each block
+  double **blocks;         // NJEpochs pointers, each to a dense n_b x n_b block
+};
 
 typedef struct {
 	pulsar *pulse;
@@ -113,12 +119,14 @@ typedef struct {
 	int useOriginalErrors;
 	int incShannonJitter;
 	int incNGJitter;
+        int KJitter;        
         int incNGSJitter;
 	int numNGJitterEpochs;
         int numNGSJitterEpochs;
 	double **NGJitterMatrix;
         double **NGSJitterMatrix;
 	int *NGJitterSysFlags;
+        int *NGJitterEpochFlags;
         int *NGSJitterSysFlags;
 	int incGlitch;
 	int incGlitchTerms;
@@ -139,6 +147,7 @@ typedef struct {
 	int FitWhiteSolarWind;
 	int storeFMatrices;
 	double *StoredTMatrix;
+        NoiseMatrix StoredNoiseMatrix;
 	double *StoredDMVals;
 	int *TimingGradientSigns;
 	int usecosiprior;
@@ -472,6 +481,7 @@ void setupparams(char *ConfigFileName, int &useGPUS,
 		double *BandNoiseAmpPrior,
 		double *BandNoiseAlphaPrior,
 		int &incNGJitter,
+		int &KJitter,
                 int &incNGSJitter,
 		int &incGlitch,
                 int &incGlitchTerms,

@@ -53,7 +53,6 @@
 #include <iomanip>
 #include <sstream>
 #include <iterator>
-#include <cstring>
 
 #ifdef HAVE_MLAPACK
 #include <mpblas_mpfr.h>
@@ -66,22 +65,162 @@ void *globalcontext;
 //void SmallNelderMeadOptimum(int nParameters, double *ML);
 //void  WriteProfileFreqEvo(std::string longname, int &ndim, int profiledimstart);
 
+#include <cmath>
+#include <stdexcept>
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
+#include <string>
+#include <math.h>
+#include <algorithm>
+#include <stdio.h>
+
+extern "C" {
+  void dgetrf_(const int* m, const int* n, double* a, const int* lda,
+	       int* ipiv, int* info);
+  void dgetri_(const int* n, double* a, const int* lda,
+	       const int* ipiv, double* work, const int* lwork, int* info);
+  void dgetrs_(const char* trans, const int* n, const int* nrhs,
+	       const double* a, const int* lda, const int* ipiv,
+	       double* b, const int* ldb, int* info);
+}
+
+/*
+ * Computes FtNF = F^T * N^{-1} * F, tNt = t^T * N^{-1} * t,
+ * and FtNt = F^T * N^{-1} * t, where N is a block diagonal matrix
+ * stored as a collection of dense blocks.
+ * Also returns the log-determinant of N.
+ *
+ * Parameters:
+ *   NoiseMat    - Compact block diagonal noise matrix.
+ *                 blocks[b] is the dense n_b x n_b block for epoch b,
+ *                 containing both diagonal (white noise) and off-diagonal
+ *                 (ECORR) entries.
+ *                 block_sizes[b] gives the size of block b.
+ *   M           - Number of columns of F.
+ *   F           - Input matrix, N x M, column-major.
+ *   t           - Input vector, length N.
+ *   FtNF        - Output matrix, M x M, column-major (must be pre-zeroed).
+ *   tNt         - Output: scalar t^T * N^{-1} * t.
+ *   FtNt        - Output vector, length M (must be pre-zeroed).
+ *   logdet      - Output: natural logarithm of |det(N)|.
+ *   sign        - Output: +1.0 or -1.0, the sign of det(N).
+ *                 0.0 if N is singular.
+ *
+ * Throws:
+ *   std::runtime_error if any block is singular.
+ */
+
+void compute_all_three(const NoiseMatrix &NoiseMat,
+                       int M,
+                       const double *F,
+                       const double *t,
+                       double *FtNF,
+                       double &tNt,
+                       double *FtNt,
+                       double &logdet,
+                       double &sign)
+{
+  double alpha = 1.0;
+  int one = 1;
+
+  int N = NoiseMat.nobs;
+
+  // Consistency check
+  int total = 0;
+  for (int b = 0; b < NoiseMat.NJEpochs; ++b)
+    total += NoiseMat.block_sizes[b];
+  if (total != N) {
+    throw std::runtime_error("compute_all_three: block_sizes sum != nobs");
+  }
+
+  double *F_nc = const_cast<double*>(F);
+
+  tNt = 0.0;
+  logdet = 0.0;
+  sign = 1.0;
+  int offset = 0;
+
+  for (int b = 0; b < NoiseMat.NJEpochs; ++b) {
+    int n = NoiseMat.block_sizes[b];
+    int nrhs = M + 1;
+    double beta = (b == 0) ? 0.0 : 1.0;   // overwrite on first block
+
+    // Copy the dense block into a working array
+    double *work = new double[n * n];
+    for (int j = 0; j < n * n; ++j)
+      work[j] = NoiseMat.blocks[b][j];
+
+    // LU factorization
+    int *ipiv = new int[n];
+    int info = 0;
+    dgetrf_(&n, &n, work, &n, ipiv, &info);
+
+    if (info < 0) {
+      delete[] ipiv; delete[] work;
+      throw std::runtime_error("dgetrf: illegal argument.");
+    } else if (info > 0) {
+      delete[] ipiv; delete[] work;
+      logdet = -INFINITY; sign = 0.0;
+      return;
+    }
+
+    // Accumulate log-determinant and sign
+    for (int i = 0; i < n; ++i) {
+      double d = work[i*n + i];
+      if (d < 0.0) { sign = -sign; logdet += std::log(-d); }
+      else if (d > 0.0) { logdet += std::log(d); }
+      else { logdet = -INFINITY; sign = 0.0;
+	delete[] ipiv; delete[] work; return; }
+    }
+    for (int i = 0; i < n; ++i)
+      if (ipiv[i] != (i+1)) sign = -sign;
+
+    // Build combined RHS [F_b | t_b]
+    double *G = new double[n * nrhs];
+    for (int j = 0; j < M; ++j)
+      for (int i = 0; i < n; ++i)
+	G[j*n + i] = F[j*N + (offset + i)];
+    for (int i = 0; i < n; ++i)
+      G[M*n + i] = t[offset + i];
+
+    // Solve N_b * G = [F_b | t_b]
+    dgetrs_("N", &n, &nrhs, work, &n, ipiv, G, &n, &info);
+    if (info != 0) {
+      delete[] G; delete[] ipiv; delete[] work;
+      throw std::runtime_error("dgetrs: solve failed.");
+    }
+
+    double *Gb = G;
+    double *gb = G + M*n;
+
+    // FtNF += F_b^T * Gb
+    dgemm_("T", "N", &M, &M, &n,
+	   &alpha, F_nc + offset, &N,
+	   Gb, &n,
+	   &beta, FtNF, &M);
+
+    // FtNt += F_b^T * gb
+    dgemv_("T", &n, &M, &alpha,
+	   F_nc + offset, &N,
+	   gb, &one,
+	   &beta, FtNt, &one);
+
+    // tNt += t_b^T * gb
+    for (int i = 0; i < n; ++i)
+      tNt += t[offset + i] * gb[i];
+
+    delete[] G; delete[] ipiv; delete[] work;
+    offset += n;
+  }
+}
+
+///////////////////////////////////////////////////////////////////
+
 void assigncontext(void *context){
         globalcontext=context;
 }
 
-/*
-int Wrap(int kX, int const kLowerBound, int const kUpperBound)
-{
-    int range_size = kUpperBound - kLowerBound + 1;
-
-    if (kX < kLowerBound)
-        kX += range_size * ((kLowerBound - kX) / range_size + 1);
-
-    return kLowerBound + (kX - kLowerBound) % range_size;
-}
-
-*/
 void TNothpl(int n,double x,double *pl){
 
 
@@ -147,299 +286,22 @@ void TNothplMC(int n,double x,double *pl, int cpos){
 
 }
 
-
-double  FastNewLRedMarginLogLike(double *Cube, int ndim, double *DerivedParams, int npars, void *context) {
-  
-	printf("In fast like\n");
-	int pcount=0;
-	
-	int numfit=((MNStruct *)globalcontext)->numFitTiming + ((MNStruct *)globalcontext)->numFitJumps + ((MNStruct *)globalcontext)->numFitfdJumps;
-	long double LDparams[numfit];
-	double Fitparams[numfit];
-	double *Resvec=new double[((MNStruct *)globalcontext)->pulse->nobs];
-	int fitcount=0;
-	
-	pcount=0;
-
-	for(int p=0;p< ((MNStruct *)globalcontext)->numFitTiming + ((MNStruct *)globalcontext)->numFitJumps + ((MNStruct *)globalcontext)->numFitfdJumps; p++){
-		if(((MNStruct *)globalcontext)->Dpriors[p][1] != ((MNStruct *)globalcontext)->Dpriors[p][0]){
-
-			double val = 0;
-			if((((MNStruct *)globalcontext)->LDpriors[p][3]) == 0){
-				val = Cube[fitcount];
-			}
-			if((((MNStruct *)globalcontext)->LDpriors[p][3]) == 1){
-				val = pow(10.0,Cube[fitcount]);
-			}
-			LDparams[p]=val*(((MNStruct *)globalcontext)->LDpriors[p][1]) + (((MNStruct *)globalcontext)->LDpriors[p][0]);
-			fitcount++;
-		}
-		else if(((MNStruct *)globalcontext)->Dpriors[p][1] == ((MNStruct *)globalcontext)->Dpriors[p][0]){
-			LDparams[p]=((MNStruct *)globalcontext)->Dpriors[p][0]*(((MNStruct *)globalcontext)->LDpriors[p][1]) + (((MNStruct *)globalcontext)->LDpriors[p][0]);
-		}
-
-
-	}
-	pcount=0;
-	double phase=(double)LDparams[0];
-	pcount++;
-	for(int p=1;p<((MNStruct *)globalcontext)->numFitTiming;p++){
-		((MNStruct *)globalcontext)->pulse->param[((MNStruct *)globalcontext)->TempoFitNums[p][0]].val[((MNStruct *)globalcontext)->TempoFitNums[p][1]] = LDparams[pcount];	
-		pcount++;
-	}
-	for(int p=0;p<((MNStruct *)globalcontext)->numFitJumps;p++){
-		((MNStruct *)globalcontext)->pulse->jumpVal[((MNStruct *)globalcontext)->TempoJumpNums[p]]= LDparams[pcount];
-		pcount++;
-	}
-	for(int p=0;p<((MNStruct *)globalcontext)->numFitfdJumps;p++){
-	  ((MNStruct *)globalcontext)->pulse->fdjumpVal[((MNStruct *)globalcontext)->TempofdJumpNums[p]]= LDparams[pcount];
-	  pcount++;
-	}
-	
-	fastformBatsAll(((MNStruct *)globalcontext)->pulse,((MNStruct *)globalcontext)->numberpulsars);       
-	formResiduals(((MNStruct *)globalcontext)->pulse,((MNStruct *)globalcontext)->numberpulsars,1);       
-	
-	for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-		Resvec[o]=(double)((MNStruct *)globalcontext)->pulse->obsn[o].residual+phase;
-
-	}
-
-	
-	pcount=fitcount;
-
-	if(((MNStruct *)globalcontext)->incStep > 0){
-		for(int i = 0; i < ((MNStruct *)globalcontext)->incStep; i++){
-			double StepAmp = Cube[pcount];
-			pcount++;
-			double StepTime = Cube[pcount];
-			pcount++;
-			for(int o1=0;o1<((MNStruct *)globalcontext)->pulse->nobs; o1++){
-				if(((MNStruct *)globalcontext)->pulse->obsn[o1].bat > StepTime){
-					Resvec[o1] += StepAmp;
-				}
-			}
-		}
-	}	
-
-
-/////////////////////////////////////////////////////////////////////////////////////////////  
-///////////////////////////Subtract GLitches/////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////////////  
-
-	for(int i = 0 ; i < ((MNStruct *)globalcontext)->incGlitch; i++){
-		double GlitchMJD = Cube[pcount];
-		pcount++;
-
-		double *GlitchAmps = new double[2];
-		if(((MNStruct *)globalcontext)->incGlitchTerms==1 || ((MNStruct *)globalcontext)->incGlitchTerms==3){
-			GlitchAmps[0]  = Cube[pcount];
-			pcount++;
-		}
-		else if(((MNStruct *)globalcontext)->incGlitchTerms==2){
-			GlitchAmps[0]  = Cube[pcount];
-                        pcount++;
-			GlitchAmps[1]  = Cube[pcount];
-                        pcount++;
-		}
-
-
-		for(int o1=0;o1<((MNStruct *)globalcontext)->pulse->nobs; o1++){
-                        if(((MNStruct *)globalcontext)->pulse->obsn[o1].bat > GlitchMJD){
-
-				if(((MNStruct *)globalcontext)->incGlitchTerms==1){
-
-					long double arg=0;
-					arg=((((MNStruct *)globalcontext)->pulse->obsn[o1].bat - GlitchMJD)/((MNStruct *)globalcontext)->pulse->param[param_f].val[0])*86400.0;
-					double darg = (double)arg;
-                                        Resvec[o1] += GlitchAmps[0]*darg;
-
-				}
-				else if(((MNStruct *)globalcontext)->incGlitchTerms==2){
-					for(int j = 0; j < ((MNStruct *)globalcontext)->incGlitchTerms; j++){
-
-						long double arg=0;
-						if(j==0){
-							arg=((((MNStruct *)globalcontext)->pulse->obsn[o1].bat - GlitchMJD)/((MNStruct *)globalcontext)->pulse->param[param_f].val[0])*86400.0;
-						}
-						if(j==1){
-							arg=0.5*pow((((MNStruct *)globalcontext)->pulse->obsn[o1].bat - GlitchMJD)*86400.0,2)/((MNStruct *)globalcontext)->pulse->param[param_f].val[0];
-						}
-						double darg = (double)arg;
-						Resvec[o1] += GlitchAmps[j]*darg;
-					}
-				}
-				else if(((MNStruct *)globalcontext)->incGlitchTerms==3){
-					long double arg=0;
-					arg=0.5*pow((((MNStruct *)globalcontext)->pulse->obsn[o1].bat - GlitchMJD)*86400.0,2)/((MNStruct *)globalcontext)->pulse->param[param_f].val[0];
-					double darg = (double)arg;
-                                        Resvec[o1] += GlitchAmps[0]*darg;
-				}
-
-
-			}
-		}
-	}
-	
-/////////////////////////////////////////////////////////////////////////////////////////////  
-/////////////////////////Get White Noise vector///////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////////////  
-
-
-
-
-	double *Noise;	
-	Noise=new double[((MNStruct *)globalcontext)->pulse->nobs];
-	
-	
-	for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-		Noise[o] = ((MNStruct *)globalcontext)->PreviousNoise[o];
-	}
-		
-	
-
-/////////////////////////////////////////////////////////////////////////////////////////////  
-/////////////////////////Get Time domain likelihood//////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////// 
-
-
-	double tdet=0;
-	double timelike=0;
-
-	for(int o=0; o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-		timelike+=Resvec[o]*Resvec[o]*Noise[o];
-		tdet -= log(Noise[o]);
-	}
-
-	printf("Fast time like %g %g %i\n", timelike, tdet, ((MNStruct *)globalcontext)->totCoeff);
-
-//////////////////////////////////////////////////////////////////////////////////////////  
-///////////////////////Do Algebra/////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////////
-
-
-        int totCoeff=((MNStruct *)globalcontext)->totCoeff;
-
-        int TimetoMargin=0;
-        for(int i =0; i < ((MNStruct *)globalcontext)->numFitTiming+((MNStruct *)globalcontext)->numFitJumps + ((MNStruct *)globalcontext)->numFitfdJumps; i++){
-                if(((MNStruct *)globalcontext)->LDpriors[i][2]==1)TimetoMargin++;
-        }
-	
-	
-
-
-	int totalsize=totCoeff + TimetoMargin;
-
-	double *NTd = new double[totalsize];
-
-	double **NT=new double*[((MNStruct *)globalcontext)->pulse->nobs];
-	for(int i=0;i<((MNStruct *)globalcontext)->pulse->nobs;i++){
-		NT[i]=new double[totalsize];
-		for(int j=0;j<totalsize;j++){
-                        NT[i][j]=((MNStruct *)globalcontext)->PreviousNT[i][j];
-                }
-
-	}
-
-	double **TNT=new double*[totalsize];
-	for(int i=0;i<totalsize;i++){
-		TNT[i]=new double[totalsize];
-		for(int j=0;j<totalsize;j++){
-			TNT[i][j] = ((MNStruct *)globalcontext)->PreviousTNT[i][j];
-		}
-	}
-	
-
-	
-
-
-
-	dgemv(NT,Resvec,NTd,((MNStruct *)globalcontext)->pulse->nobs,totalsize,'T');
-
-
-
-	double freqlike=0;
-	double *WorkCoeff = new double[totalsize];
-	for(int o1=0;o1<totalsize; o1++){
-	    WorkCoeff[o1]=NTd[o1];
-	}
-
-	int globalinfo=0;
-	int info=0;
-	double jointdet = ((MNStruct *)globalcontext)->PreviousJointDet;	
-	double freqdet = ((MNStruct *)globalcontext)->PreviousFreqDet;
-	double uniformpriorterm = ((MNStruct *)globalcontext)->PreviousUniformPrior;
-
-	info=0;
-	dpotrsInfo(TNT, WorkCoeff, totalsize, info);
-	if(info != 0)globalinfo=1;
-
-
-	for(int j=0;j<totalsize;j++){
-	    freqlike += NTd[j]*WorkCoeff[j];
-
-	}
-
-
-	double lnew = -0.5*(tdet+jointdet+freqdet+timelike-freqlike) + uniformpriorterm;
-	
-	if(isnan(lnew) || isinf(lnew) || globalinfo != 0){
-
-		lnew=-pow(10.0,20);
-		
-	}
-
-/*
-        if(((MNStruct *)globalcontext)->uselongdouble > 0 ){
-                fpu_fix_end(&oldcw);
-        }
-*/
-
-
-	delete[] WorkCoeff;
-	delete[] NTd;
-	delete[] Noise;
-	delete[] Resvec;
-	
-	for (int j = 0; j < ((MNStruct *)globalcontext)->pulse->nobs; j++){
-		delete[]NT[j];
-	}
-	delete[]NT;
-
-	for (int j = 0; j < totalsize; j++){
-		delete[]TNT[j];
-	}
-	delete[]TNT;
-
-	return lnew;
-
-
-}
-
-
 void LRedLikeMNWrap(double *Cube, int &ndim, int &npars, double &lnew, void *context){
-
-
 
         for(int p=0;p<ndim;p++){
 
                 Cube[p]=(((MNStruct *)globalcontext)->PriorsArray[p+ndim]-((MNStruct *)globalcontext)->PriorsArray[p])*Cube[p]+((MNStruct *)globalcontext)->PriorsArray[p];
         }
-
-
 	
 	double *DerivedParams = new double[npars];
-
-	//double result = NewLRedMarginLogLike(ndim, Cube, npars, DerivedParams, context);
 	double result = NewLRedMarginLogLike(Cube, ndim, DerivedParams, npars, context);
 
 	delete[] DerivedParams;
 
 	lnew = result;
-
 }
 
-//double  NewLRedMarginLogLike(int &ndim, double *Cube, int &npars, double *DerivedParams, void *context){
-double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived, void *context) {
+double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived, void *context) {
 
   logtchk("Entering TempoNest likelihood");
 
@@ -457,21 +319,22 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	double Fitparams[numfit];
 	double *Resvec=new double[((MNStruct *)globalcontext)->pulse->nobs];
 	int fitcount=0;
+	NoiseMatrix NoiseMat = ((MNStruct *)globalcontext)->StoredNoiseMatrix; // Block diagonal white-noise matrix containing ECORR
+
+	for (int b = 0; b < NoiseMat.NJEpochs; ++b) {
+	  memset(NoiseMat.blocks[b], 0, sizeof(double) * NoiseMat.block_sizes[b] * NoiseMat.block_sizes[b]);
+	}
+
+	//printf("%i %i\n", NoiseMat.NJEpochs, NoiseMat.nobs);
+	//for(int i=0;i<NoiseMat.NJEpochs;i++)
+	//  memset(NoiseMat.block);
+	//  {
+	//    printf("%i ", NoiseMat.block_sizes[i]);
+	//  }
+	//exit(0);
 
 
 	pcount=0;
-	///////////////hacky glitch thing for Vela, comment this out for *anything else*/////////////////////////
-	//for(int p=1;p<9; p++){
-		//Cube[p] = Cube[0];
-	//	printf("Cube 0 %g \n", Cube[0]);
-	//}
-        //for(int p=10;p<17; p++){
-        //      Cube[p] = Cube[9];
-	//	printf("Cube 9 %g\n", Cube[9]);
-        //}
-
-	///////////////end of hacky glitch thing for Vela///////////////////////////////////////////////////////
-
 
 	// Convert priors to physical units (here only for timing parameters and jumps)
 	for(int p=0;p< ((MNStruct *)globalcontext)->numFitTiming + ((MNStruct *)globalcontext)->numFitJumps + ((MNStruct *)globalcontext)->numFitfdJumps; p++){
@@ -503,8 +366,6 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 		else if(((MNStruct *)globalcontext)->Dpriors[p][1] == ((MNStruct *)globalcontext)->Dpriors[p][0]){
 			LDparams[p]=((MNStruct *)globalcontext)->Dpriors[p][0]*(((MNStruct *)globalcontext)->LDpriors[p][1]) + (((MNStruct *)globalcontext)->LDpriors[p][0]);
 		}
-
-
 	}
 
 	pcount=0;
@@ -532,13 +393,9 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 		formResiduals(((MNStruct *)globalcontext)->pulse,((MNStruct *)globalcontext)->numberpulsars,1);       /* Form residuals */
 	}
 	
-	for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-	
+	for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++){	
 		Resvec[o]=(double)((MNStruct *)globalcontext)->pulse->obsn[o].residual+phase;
-		//printf("Res: %i %g %g %g %g %g %g %g\n", o, Resvec[o], (double) phase, ((MNStruct *)globalcontext)->Dpriors[0][0], ((MNStruct *)globalcontext)->Dpriors[0][1], (double)((MNStruct *)globalcontext)->LDpriors[0][1] , (double)((MNStruct *)globalcontext)->LDpriors[0][0], (double)((MNStruct *)globalcontext)->pulse->obsn[o].residual);
-
 	}
-
 	
 	pcount=fitcount;
 	if(((MNStruct *)globalcontext)->incStep > 0){
@@ -629,18 +486,19 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 					double darg = (double)arg;
                                         Resvec[o1] += GlitchAmps[0]*darg + GlitchAmps[1]*darg*exp(-1*time/GlitchAmps[2]);
 				}
-
-
 			}
 		}
-
 		delete[] GlitchAmps;
 	}
-	
+
 /////////////////////////////////////////////////////////////////////////////////////////////  
-/////////////////////////Get White Noise vector///////////////////////////////////////////////
+/////////////////////////Get White Noise vector or matrix///////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////  
 
+	double *Noise;	// N^-1 in Eq. 17 of Len2014
+	double *BATvec;
+
+	Noise=new double[((MNStruct *)globalcontext)->pulse->nobs];
 
 	if(((MNStruct *)globalcontext)->numFitEFAC == 0){
 		EFAC=new double*[((MNStruct *)globalcontext)->EPolTerms];
@@ -733,7 +591,6 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 		}
     	}
     
-
         double *SQUAD;
 	if(((MNStruct *)globalcontext)->incShannonJitter == 0){
 		SQUAD=new double[((MNStruct *)globalcontext)->systemcount];
@@ -752,31 +609,49 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	else if(((MNStruct *)globalcontext)->incShannonJitter > 1){
         SQUAD=new double[((MNStruct *)globalcontext)->systemcount];
         for(int o=0;o<((MNStruct *)globalcontext)->systemcount; o++){
-            SQUAD[o]=pow(10.0,2*Cube[pcount]);
-	    if(((MNStruct *)globalcontext)->EQUADPriorType ==1) { uniformpriorterm +=log(pow(10.0,Cube[pcount])); }
-
-			pcount++;
+	  SQUAD[o]=pow(10.0,2*Cube[pcount]);
+	  if(((MNStruct *)globalcontext)->EQUADPriorType ==1) { uniformpriorterm +=log(pow(10.0,Cube[pcount])); }
+	  pcount++;
         }
-    }
+	}
  
-	double *ECORRPrior;
+	double *ECORRPrior, *ECorrCoeffs;
+	try {
+	  ECorrCoeffs=new double[((MNStruct *)globalcontext)->incNGJitter]; // incNGJitter -> Number of TNECORRs
+	}
+	catch (const std::bad_alloc& e) {
+	}
+
 	if(((MNStruct *)globalcontext)->incNGJitter >0){
-		double *ECorrCoeffs=new double[((MNStruct *)globalcontext)->incNGJitter];	
-		for(int i =0; i < ((MNStruct *)globalcontext)->incNGJitter; i++){
-			ECorrCoeffs[i] = pow(10.0, 2*Cube[pcount]);
-			if(((MNStruct *)globalcontext)->EQUADPriorType ==1) { uniformpriorterm +=log(pow(10.0,Cube[pcount])); }
-			pcount++;
+	  for(int i =0; i < ((MNStruct *)globalcontext)->incNGJitter; i++){
+	    ECorrCoeffs[i] = pow(10.0, 2*Cube[pcount]);
+	    if(((MNStruct *)globalcontext)->EQUADPriorType ==1) { uniformpriorterm +=log(pow(10.0,Cube[pcount])); }
+	    pcount++;
+	  }
+
+	  ECORRPrior = new double[((MNStruct *)globalcontext)->numNGJitterEpochs];
+	  for(int i =0; i < ((MNStruct *)globalcontext)->numNGJitterEpochs; i++){
+	    ECORRPrior[i] = ECorrCoeffs[((MNStruct *)globalcontext)->NGJitterSysFlags[i]];
+	  }
+	
+	  // Fill the Kernal ECORR coefficients in the white-noise covariance matrix
+	  if(((MNStruct *)globalcontext)->KJitter == 1){
+	    int nobs=0;
+	    for(int i =0; i < NoiseMat.NJEpochs; i++){
+	      // ECORR applied TOAs
+	      if( ((MNStruct *)globalcontext)->NGJitterEpochFlags[nobs] >= 0){
+		for(int j=0; j < NoiseMat.block_sizes[i]; j++){
+		  for(int k=0; k < NoiseMat.block_sizes[i]; k++){
+		    NoiseMat.blocks[i][k * NoiseMat.block_sizes[i] + j] += ECorrCoeffs[((MNStruct *)globalcontext)->NGJitterEpochFlags[nobs]];
+		  }
 		}
-    		ECORRPrior = new double[((MNStruct *)globalcontext)->numNGJitterEpochs];
-		for(int i =0; i < ((MNStruct *)globalcontext)->numNGJitterEpochs; i++){
-			ECORRPrior[i] = ECorrCoeffs[((MNStruct *)globalcontext)->NGJitterSysFlags[i]];
-		}
-
-		delete[] ECorrCoeffs;
-	} 
-
-
-
+	      }
+	      nobs += NoiseMat.block_sizes[i];
+	    }
+	  }
+	  delete[] ECorrCoeffs;
+	}
+       	  
         double *SECORRPrior;
 	if(((MNStruct *)globalcontext)->incNGSJitter >0){
 		double *SECorrCoeffs=new double[((MNStruct *)globalcontext)->incNGSJitter];	
@@ -789,11 +664,8 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 		for(int i =0; i < ((MNStruct *)globalcontext)->numNGSJitterEpochs; i++){
 			SECORRPrior[i] = SECorrCoeffs[((MNStruct *)globalcontext)->NGSJitterSysFlags[i]];
 		}
-
 		delete[] SECorrCoeffs;
 	} 
-
-
 
 	double DMEQUAD = 0;
 	if(((MNStruct *)globalcontext)->incDMEQUAD > 0){
@@ -816,21 +688,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 
 		//printf("White Solar Wind: %g \n", WhiteSolarWind);
 	}
-
-
-
-	double *Noise;	
-	double *BATvec;
-	Noise=new double[((MNStruct *)globalcontext)->pulse->nobs];
-	//BATvec=new double[((MNStruct *)globalcontext)->pulse->nobs];
-	
-	
-	//for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-		//BATvec[o]=(double)((MNStruct *)globalcontext)->pulse->obsn[o].bat;
-	//}
 		
-		
-
 	double DMKappa = 2.410*pow(10.0,-16);
 	if(((MNStruct *)globalcontext)->whitemodel == 0){
 	
@@ -840,8 +698,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 			double ShannonJitterTerm=0;
 
 			double SWTerm = WhiteSolarWind * ((MNStruct *)globalcontext)->pulse->obsn[o].tdis2 / ((MNStruct *)globalcontext)->pulse->ne_sw;
-			double DMEQUADTerm = DMEQUAD/(DMKappa*pow((double)((MNStruct *)globalcontext)->pulse->obsn[o].freqSSB,2));	
-						
+			double DMEQUADTerm = DMEQUAD/(DMKappa*pow((double)((MNStruct *)globalcontext)->pulse->obsn[o].freqSSB,2));							
 			
 			if(((MNStruct *)globalcontext)->useOriginalErrors==0){
 				noiseval=((MNStruct *)globalcontext)->pulse->obsn[o].toaErr;
@@ -867,13 +724,30 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	else if(((MNStruct *)globalcontext)->whitemodel == 1){
 	
 		for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-
-			Noise[o]=1.0/(EFAC[0][((MNStruct *)globalcontext)->sysFlags[o]]*EFAC[0][((MNStruct *)globalcontext)->sysFlags[o]]*(pow(((((MNStruct *)globalcontext)->pulse->obsn[o].toaErr)*pow(10.0,-6)),2) + EQUAD[((MNStruct *)globalcontext)->sysFlags[o]]));
-		}
-		
+		  Noise[o]=1.0/(EFAC[0][((MNStruct *)globalcontext)->sysFlags[o]]*EFAC[0][((MNStruct *)globalcontext)->sysFlags[o]]*(pow(((((MNStruct *)globalcontext)->pulse->obsn[o].toaErr)*pow(10.0,-6)),2) + EQUAD[((MNStruct *)globalcontext)->sysFlags[o]]));
+		}		
 	}
 
-	
+	// Add other components into white-noise matrix
+	if(((MNStruct *)globalcontext)->KJitter == 1){
+	  int nobs = 0;
+	  for(int i=0; i<NoiseMat.NJEpochs; i++){
+	    for(int j=0; j<NoiseMat.block_sizes[i]; j++){
+	      NoiseMat.blocks[i][j * NoiseMat.block_sizes[i] + j] += 1.0/Noise[nobs];
+	      nobs++;
+	    }
+	  }
+	  if(nobs != ((MNStruct *)globalcontext)->pulse->nobs){
+	    printf("NTOA counting error when adding white-noise vector.");
+	    exit(1);
+	  }
+	}
+
+	//printf("%i!!!!!!!!!!!!!!\n", nblock);
+	//printf("%i %i!!!!!!!!!!!!!!!!!!\n", NoiseMat.block_sizes[0], NoiseMat.block_sizes[1]);
+	//printf("%lf %lf %lf \n", sqrt(NoiseMat.blocks[0][0]), sqrt(NoiseMat.blocks[1][2]), sqrt(NoiseMat.blocks[2][1]));
+
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////  
 ///////////////////////////Initialise TotalMatrix////////////////////////////////////////////
@@ -881,7 +755,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 
 	int totalsize = ((MNStruct *)globalcontext)->totalsize;
 	
-	double *TotalMatrix=((MNStruct *)globalcontext)->StoredTMatrix;
+	double *TotalMatrix=((MNStruct *)globalcontext)->StoredTMatrix; // F in Eq. 17 of Len2014
 
 
 		
@@ -889,27 +763,17 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 /////////////////////////Form the Design Matrix////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////  
 
-
 	if(TimetoMargin != ((MNStruct *)globalcontext)->numFitTiming+((MNStruct *)globalcontext)->numFitJumps + ((MNStruct *)globalcontext)->numFitfdJumps){
-
 		getCustomDVectorLike(globalcontext, TotalMatrix, ((MNStruct *)globalcontext)->pulse->nobs, TimetoMargin, totalsize);
 		vector_dgesvd(TotalMatrix,((MNStruct *)globalcontext)->pulse->nobs, TimetoMargin);
-
-		
 	}
-
-
-
 
 //////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////////////Set up Coefficients///////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////  
 
-
 	double maxtspan=((MNStruct *)globalcontext)->Tspan;
 	double averageTSamp=2*maxtspan/((MNStruct *)globalcontext)->pulse->nobs;
-
-
 
 	int FitRedCoeff=2*(((MNStruct *)globalcontext)->numFitRedCoeff);
 	int FitDMCoeff=2*(((MNStruct *)globalcontext)->numFitDMCoeff);
@@ -917,11 +781,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	int FitSWCoeff=2*(((MNStruct *)globalcontext)->numFitSWCoeff);
 	int FitBandCoeff=2*(((MNStruct *)globalcontext)->numFitBandNoiseCoeff);
 	int FitGroupNoiseCoeff = 2*((MNStruct *)globalcontext)->numFitGroupNoiseCoeff;
-
 	int totCoeff=((MNStruct *)globalcontext)->totCoeff;
-
-
-
 
 	double *powercoeff=new double[totCoeff];
 	for(int o=0;o<totCoeff; o++){
@@ -1082,8 +942,6 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 			}
 		}
 		
-
-
 		int coefftovary=0;
 		double amptovary=0.0;
 		if(((MNStruct *)globalcontext)->varyRedCoeff==1){
@@ -1096,9 +954,6 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 			powercoeff[coefftovary+FitRedCoeff/2]=amptovary;	
 		}		
 		
-
-		
-
 		startpos=FitRedCoeff;
 
     }
@@ -1143,15 +998,13 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	double globalwidth=0;
 	if(((MNStruct *)globalcontext)->incRedShapeEvent != 0){
 
-
 		if(MarginRedShapelets == 1){
 
 			badshape = 1;
 
 			totalredshapecoeff = ((MNStruct *)globalcontext)->numRedShapeCoeff*((MNStruct *)globalcontext)->incRedShapeEvent;
-
 			
-
+			// Initialize with zeros
 			RedShapeletMatrix = new double*[((MNStruct *)globalcontext)->pulse->nobs];
 			for(int i = 0; i < ((MNStruct *)globalcontext)->pulse->nobs; i++){
 				RedShapeletMatrix[i] = new double[totalredshapecoeff];
@@ -1159,8 +1012,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 						RedShapeletMatrix[i][j] = 0;
 					}
 				}
-			}
-
+		        }
 
 		        for(int i =0; i < ((MNStruct *)globalcontext)->incRedShapeEvent; i++){
 
@@ -1205,6 +1057,17 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 			}
 
 		if(MarginRedShapelets == 0){
+
+			totalredshapecoeff = ((MNStruct *)globalcontext)->numRedShapeCoeff*((MNStruct *)globalcontext)->incRedShapeEvent;
+			
+			// Initialize with zeros
+			RedShapeletMatrix = new double*[((MNStruct *)globalcontext)->pulse->nobs];
+			for(int i = 0; i < ((MNStruct *)globalcontext)->pulse->nobs; i++){
+				RedShapeletMatrix[i] = new double[totalredshapecoeff];
+					for(int j = 0; j < totalredshapecoeff; j++){
+						RedShapeletMatrix[i][j] = 0;
+					}
+			}
 
 		        for(int i =0; i < ((MNStruct *)globalcontext)->incRedShapeEvent; i++){
 
@@ -1256,7 +1119,14 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 
 			}
 		}
+
+	for(int i =0;i<((MNStruct *)globalcontext)->pulse->nobs;i++){
+		for(int j =0;j<totalredshapecoeff; j++){
+			TotalMatrix[i + (j+TimetoMargin+totCoeff)*((MNStruct *)globalcontext)->pulse->nobs]=RedShapeletMatrix[i][j];
+		}
 	}
+	}
+
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////  
@@ -1327,6 +1197,8 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 			pcount++;
 			double DMindex=Cube[pcount];
 			pcount++;
+
+			//printf("DM %g \n",DMindex);
 
 			
    			double Tspan = maxtspan;
@@ -1447,6 +1319,8 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	    double SWSlope=Cube[pcount];
 	    pcount++;
 
+	    //printf("SW %g \n",SWSlope);
+
 	    double Tspan = maxtspan;
 	    // Frequency of 1/1yr
 	    double f1yr = 1.0/3.16e7;
@@ -1518,9 +1392,6 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	
 			}
 
-
-
-
 		delete[] DMshapecoeff;
 		delete[] DMshapeVec;
 		delete[] DMshapeNorm;
@@ -1528,14 +1399,9 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 		}
 	}
 
-
-
-
-
 /////////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////Subtract  DM Scatter Shape Events///////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////  
-
 
 	if(((MNStruct *)globalcontext)->incDMScatterShapeEvent != 0){
                 for(int i =0; i < ((MNStruct *)globalcontext)->incDMScatterShapeEvent; i++){
@@ -1685,10 +1551,6 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 
     	}
 
-
-
-
-
 /////////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////Add Group Noise/////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
@@ -1758,9 +1620,7 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 				powercoeff[startpos+i]+=rho;
 				powercoeff[startpos+i+FitGroupNoiseCoeff/2]+=rho;
 			}
-		
-		
-			
+	      			
 			for (int i=0; i<FitGroupNoiseCoeff/2; i++){
 				freqdet=freqdet+2*log(powercoeff[startpos+i]);
 			}
@@ -1782,124 +1642,131 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 					}
 				}
 			}
-
-
-
 			startpos=startpos+FitGroupNoiseCoeff;
 		}
-
-    }
-
-
-
-
-
+	}
 
 /////////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////Add ECORR Coeffs////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
 
 	if(((MNStruct *)globalcontext)->incNGJitter >0){
+	  if(((MNStruct *)globalcontext)->KJitter != 1) {
 		for(int i =0; i < ((MNStruct *)globalcontext)->numNGJitterEpochs; i++){
 			powercoeff[startpos+i] = ECORRPrior[i];
 			freqdet = freqdet + log(ECORRPrior[i]);
 		}
-	}
-
-
+	  }
+	}	
+	
         if(((MNStruct *)globalcontext)->incNGSJitter >0){
 		for(int i =0; i < ((MNStruct *)globalcontext)->numNGSJitterEpochs; i++){
 			powercoeff[startpos+i] = SECORRPrior[i];
 			freqdet = freqdet + log(SECORRPrior[i]);
 		}
-	}
-
-
-
-
-
+	}	
 
 /////////////////////////////////////////////////////////////////////////////////////////////  
 /////////////////////////Get Time domain likelihood//////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////  
 
-	double tdet=0;
-	double timelike=0;
+	double tdet=0.0; // Log determinant of the time-domain (noise) part
+	double timelike=0.0;
+	double dsign=0.0;
+	//double *Ndt = new double[((MNStruct *)globalcontext)->pulse->nobs];
 
-	for(int o=0; o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-		//printf("Res: %i  %g %g \n", o, Resvec[o], sqrt(Noise[o]));
-		timelike+=Resvec[o]*Resvec[o]*Noise[o];
-		tdet -= log(Noise[o]);
+	// Assume white-noise covariance matrix is diagonal
+	if(((MNStruct *)globalcontext)->KJitter != 1){
+	  for(int o=0; o<((MNStruct *)globalcontext)->pulse->nobs; o++){
+	    timelike+=Resvec[o]*Resvec[o]*Noise[o]; // First term in the bracket of Eq. 17 of Len2014
+	    tdet -= log(Noise[o]); //Noise is N^-1
+	  }
 	}
+	//else{
+	  // Calculate dt^T * N^-1 * dt when White noise matrix is a block diagonal
+	  //ftninvf_block_diagonal_vector(((MNStruct *)globalcontext)->pulse->nobs, ((MNStruct *)globalcontext)->numNGJitterEpochs, block_sizes, MNoise, Resvec, timelike, tdet, dsign);
 
-//////////////////////////////////////////////////////////////////////////////////////////  
-///////////////////////Form Total Matrices////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////////
+	  // Get N^-1 and log determinant of N
+	  //std::memcpy(InvMNoise, MNoise, ((MNStruct *)globalcontext)->pulse->nobs*((MNStruct *)globalcontext)->pulse->nobs*sizeof(double));
+	  //invert_block_diagonal(((MNStruct *)globalcontext)->pulse->nobs, InvMNoise, ((MNStruct *)globalcontext)->numNGJitterEpochs, block_sizes, tdet, dsign);
 
-	for(int i =0;i<((MNStruct *)globalcontext)->pulse->nobs;i++){
-		for(int j =0;j<totalredshapecoeff; j++){
-			TotalMatrix[i + (j+TimetoMargin+totCoeff)*((MNStruct *)globalcontext)->pulse->nobs]=RedShapeletMatrix[i][j];
-		}
-	}
+	  // Get N^-1 * dt
+	  //vector_dgemv(InvMNoise, Resvec, Ndt,((MNStruct *)globalcontext)->pulse->nobs,((MNStruct *)globalcontext)->pulse->nobs, 'N');
 
+	  // Get dt^T * (N^-1 * dt)
+	  //for(int o=0; o<((MNStruct *)globalcontext)->pulse->nobs; o++){
+	  //timelike+=Resvec[o] * Ndt[o];
+	//}
 
 //////////////////////////////////////////////////////////////////////////////////////////  
 ///////////////////////Do Algebra/////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////
+
 	logtchk("Starting algebra");
-	int savememory = 0;
+	double *NTd = new double[totalsize]; // d in Eq. 17 of Len2014
+	double *TNT=new double[totalsize*totalsize];   // SIGMA in Eq. 17 of Len2014
+	double *NT;
+	NT=new double[((MNStruct *)globalcontext)->pulse->nobs*totalsize];
+	memset(NTd, 0, sizeof(double) * totalsize);
+	memset(TNT, 0, sizeof(double) * totalsize*totalsize);
+	memset(NT, 0, sizeof(double)*((MNStruct *)globalcontext)->pulse->nobs*totalsize);
 	
-	double *NTd = new double[totalsize];
-	double *TNT=new double[totalsize*totalsize];
-	double *NT;	
-	if(savememory == 0){
-		NT=new double[((MNStruct *)globalcontext)->pulse->nobs*totalsize];
-		std::memcpy(NT, TotalMatrix, ((MNStruct *)globalcontext)->pulse->nobs*totalsize*sizeof(double));
-	
-		for(int i=0;i<((MNStruct *)globalcontext)->pulse->nobs;i++){
-			for(int j=0;j<totalsize;j++){
-				NT[i + j*((MNStruct *)globalcontext)->pulse->nobs] *= Noise[i];
-			}
-		}
+	// Calculate N^-1 * F
+	if(((MNStruct *)globalcontext)->KJitter != 1){
+	  std::memcpy(NT, TotalMatrix, ((MNStruct *)globalcontext)->pulse->nobs*totalsize*sizeof(double));
+	  for(int i=0;i<((MNStruct *)globalcontext)->pulse->nobs;i++){
+	    for(int j=0;j<totalsize;j++){
+	      NT[i + j*((MNStruct *)globalcontext)->pulse->nobs] *= Noise[i];
+	    }
+	  }
+	  // Calculate F^T * (N^-1 * F) (= F^T * N^-1 * F)
+	  vector_dgemm(TotalMatrix, NT , TNT, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, 'T', 'N');
 
-		vector_dgemm(TotalMatrix, NT , TNT, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, 'T', 'N');
-
-		vector_dgemv(NT,Resvec,NTd,((MNStruct *)globalcontext)->pulse->nobs,totalsize,'T');
+	  // Calculate (N^-1 * F)^T * delta t (= F^T * N^-1 * delta t) = d
+	  vector_dgemv(NT,Resvec,NTd,((MNStruct *)globalcontext)->pulse->nobs,totalsize,'T');
 	}
-	if(savememory == 1){
+	else{
+	  // Calculate F^T * N^-1 * F, F^T * N^-1 *dt, dt^T * N^-1 * dt at the same time
+	  compute_all_three(NoiseMat, totalsize, TotalMatrix, Resvec, TNT, timelike, NTd, tdet, dsign);
 
-		for(int i=0;i<((MNStruct *)globalcontext)->pulse->nobs;i++){
-			for(int j=0;j<totalsize;j++){
-			  TotalMatrix[i + j*((MNStruct *)globalcontext)->pulse->nobs] *= std::sqrt(Noise[i]);
-			}
-			Resvec[i] *= Noise[i];
-		}
+	  //printf("1: %lf %lf \n", timelike, tdet);
+	  //printf("1: %lf %lf %lf %lf \n", TNT[totalsize], TNT[totalsize*2], NTd[100], NTd[200]);
 
-		vector_dgemm(TotalMatrix, TotalMatrix , TNT, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, 'T', 'N');
+	  //memset(NTd, 0, sizeof(double) * totalsize);
+	//memset(TNT, 0, sizeof(double) * totalsize*totalsize);
+	//memset(NT, 0, sizeof(double)*((MNStruct *)globalcontext)->pulse->nobs*totalsize);
+	//timelike=0.0;tdet=0.0;
 
-		for(int i=0;i<((MNStruct *)globalcontext)->pulse->nobs;i++){
-			for(int j=0;j<totalsize;j++){
-			  TotalMatrix[i + j*((MNStruct *)globalcontext)->pulse->nobs] /= std::sqrt(Noise[i]);
-			}
-		}
+	  // Get N^-1 and log determinant of N
+	  //std::memcpy(InvMNoise, MNoise, ((MNStruct *)globalcontext)->pulse->nobs*((MNStruct *)globalcontext)->pulse->nobs*sizeof(double));
+	  //invert_block_diagonal(((MNStruct *)globalcontext)->pulse->nobs, InvMNoise, ((MNStruct *)globalcontext)->numNGJitterEpochs, block_sizes, tdet, dsign);
 
+	  // Get N^-1 * dt
+	  //vector_dgemv(InvMNoise, Resvec, Ndt,((MNStruct *)globalcontext)->pulse->nobs,((MNStruct *)globalcontext)->pulse->nobs, 'N');
 
-		vector_dgemv(TotalMatrix,Resvec,NTd,((MNStruct *)globalcontext)->pulse->nobs,totalsize,'T');
+	  // Get dt^T * (N^-1 * dt)
+	  //for(int o=0; o<((MNStruct *)globalcontext)->pulse->nobs; o++){
+	    //  timelike+=Resvec[o] * Ndt[o];}
 
+	  //vector_dgemm(InvMNoise, TotalMatrix, NT, ((MNStruct *)globalcontext)->pulse->nobs, ((MNStruct *)globalcontext)->pulse->nobs, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, 'N', 'N');
+	  //vector_dgemm(TotalMatrix, NT , TNT, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, 'T', 'N');
+	  //vector_dgemv(NT,Resvec,NTd,((MNStruct *)globalcontext)->pulse->nobs,totalsize,'T');
+	  //printf("2: %lf %lf \n", timelike, tdet);
+	  //printf("2: %lf %lf %lf %lf \n", TNT[totalsize], TNT[totalsize*2], NTd[100], NTd[200]);
 	}
+
 	logtchk("Fnishing main algebra");
+	delete[] NT;
 
-	if(savememory == 0){
-		delete[] NT;
-	}
+	// Calculate SIGMA = F^T * N^-1 * F + phi in Eq. (17) of Len2014, phi = powercoeff
 	for(int j=0;j<totCoeff;j++){
-			TNT[TimetoMargin+j + (TimetoMargin+j)*totalsize] += 1.0/powercoeff[j];
-			
+	  TNT[TimetoMargin+j + (TimetoMargin+j)*totalsize] += 1.0/powercoeff[j];
 	}
+
+	// If shapelet included
 	for(int j=0;j<totalredshapecoeff;j++){
 			freqdet=freqdet-log(pow(10.0, -12)*TNT[TimetoMargin+totCoeff+j + (TimetoMargin+totCoeff+j)*totalsize]);
-			TNT[TimetoMargin+totCoeff+j + (TimetoMargin+totCoeff+j)*totalsize] += pow(10.0, -12)*TNT[TimetoMargin+totCoeff+j + (TimetoMargin+totCoeff+j)*totalsize];
-			
+			TNT[TimetoMargin+totCoeff+j + (TimetoMargin+totCoeff+j)*totalsize] += pow(10.0, -12)*TNT[TimetoMargin+totCoeff+j + (TimetoMargin+totCoeff+j)*totalsize];			
 	}
 
 	double freqlike=0;
@@ -1922,18 +1789,21 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 
         if(info != 0)globalinfo=1;
 	info=0;
+
+	// Get log determinant of SIGMA (det2), and SIGMA^-1 * d (stored in WorkCoeff2)
 	double det2=0;
 	vector_TNqrsolve(TNT2, NTd, WorkCoeff2, totalsize, det2, info);
- 
+
+	// Get d^T * (SIGMA^-1 * d) (freqlike2)
 	double freqlike2 = 0;    
 	for(int j=0;j<totalsize;j++){
 		freqlike += NTd[j]*WorkCoeff[j];
 		freqlike2+=NTd[j]*WorkCoeff2[j];
 	}
 
-
+	// freqdet = log(det(phi)), tdet = log(det(N)), det2 = log(det(SIGMA))
 	double lnewChol =-0.5*(tdet+jointdet+freqdet+timelike-freqlike) + uniformpriorterm;
-	double lnew=-0.5*(tdet+det2+freqdet+timelike-freqlike2) + uniformpriorterm;
+	double lnew=-0.5*(tdet+det2+freqdet+timelike-freqlike2) + uniformpriorterm; //Log likelihood in Eq. 17 of Len2014
 	//printf("Double %g %i\n", lnew, globalinfo);
 	if(fabs(lnew-lnewChol)>0.05){
 		globalinfo = 1;
@@ -1941,12 +1811,10 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	}
 	if(isnan(lnew) || isinf(lnew) || globalinfo != 0){
 		globalinfo = 1;
-		lnew=-pow(10.0,20);
-		
+		lnew=-pow(10.0,20);		
 	}
 
 	if(badshape == 1){lnew=-pow(10.0,20);}
-
 
 	delete[] DMVec;
 	delete[] ScatVec;
@@ -1962,17 +1830,17 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
 	delete[] freqs;
 	delete[] Noise;
 	delete[] Resvec;
-	delete[]TNT;
+	delete[] TNT;
 	delete[] TNT2;
+	//delete[] Ndt;
 
-	if(((MNStruct *)globalcontext)->incNGJitter >0){
+	if(((MNStruct *)globalcontext)->incNGJitter >0 && ((MNStruct *)globalcontext)->KJitter != 1){
 		delete[] ECORRPrior;
 	}
 
         if(((MNStruct *)globalcontext)->incNGSJitter >0){
 		delete[] SECORRPrior;
 	}
-
 
 	if(totalredshapecoeff > 0){
 		for (int j = 0; j < ((MNStruct *)globalcontext)->pulse->nobs; j++){
@@ -1987,22 +1855,18 @@ double  NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived
         ((MNStruct *)globalcontext)->PreviousFreqDet = freqdet;
         ((MNStruct *)globalcontext)->PreviousUniformPrior = uniformpriorterm;
 
-        // printf("tdet %g, jointdet %g, freqdet %g, lnew %g, timelike %g, freqlike %g\n", tdet, jointdet, freqdet, lnew, timelike, freqlike);
-
+        //printf("tdet %g, jointdet %g, freqdet %g, lnew %g, timelike %g, freqlike %g\n", tdet, jointdet, freqdet, lnew, timelike, freqlike);
 
 	//printf("CPUChisq: %g %g %g %g %g %g \n",lnew,jointdet,tdet,freqdet,timelike,freqlike);
 	logtchk("Exiting TempoNest Likelihood");
 
+	//printf("!!!!!!!!!!!!!!!!!!!!!!!!\n");
+
 	return lnew;
-
-	
-
-
 }
 
+
 void TemplateProfLikeMNWrap(double *Cube, int &ndim, int &npars, double &lnew, void *context){
-
-
 
         for(int p=0;p<ndim;p++){
 

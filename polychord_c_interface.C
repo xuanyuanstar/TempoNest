@@ -26,7 +26,7 @@ Settings::Settings(int _nDims,int _nDerived):
     write_live          {false},
     write_dead          {false},
     write_prior         {true},
-    maximise            {true},
+    maximise            {false},
     compression_factor  {0.36787944117144233},
     base_dir            {"chains"},
     file_root           {"test"},
