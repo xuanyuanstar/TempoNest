@@ -98,6 +98,76 @@ void extra_delays(pulsar *psr,int npsr);
 extern "C" void copy_staticTmat_(double *T, int totalsize, int Nobs);
 #endif /* HAVE_CULA */
 
+/*
+ * Calls t2Fit on all ranks, but processes them in batches of size batch_size.
+ * Within each batch, ranks call t2Fit concurrently.
+ * A barrier ensures the entire batch finishes before the next batch starts.
+ *
+ * Parameters:
+ *   psr            - Pulsar structure (in/out)
+ *   npsr           - Number of pulsars
+ *   covarFuncFile  - Covariance function file
+ *   batch_size     - Number of ranks that call t2Fit concurrently in each batch
+ *   comm           - The communicator (e.g., MPI_COMM_WORLD)
+ */
+void batched_t2Fit(pulsar *psr, unsigned int npsr,
+                   const char *covarFuncFile,
+                   int batch_size,
+                   MPI_Comm comm)
+{
+  int rank, size;
+  MPI_Comm_rank(comm, &rank);
+  MPI_Comm_size(comm, &size);
+
+  // Clamp batch_size to a valid range
+  int bsize = std::min(std::max(batch_size, 1), size);
+
+  // Number of batches needed
+  int num_batches = (size + bsize - 1) / bsize;
+
+  for (int batch = 0; batch < num_batches; ++batch) {
+    int first = batch * bsize;
+    int last  = std::min(first + bsize, size);
+
+    // Ranks in [first, last-1] participate in this batch
+    if (rank >= first && rank < last) {
+      t2Fit(psr, npsr, covarFuncFile);
+    }
+
+    // Barrier: wait for the entire batch to finish before the next one
+    MPI_Barrier(comm);
+  }
+}
+
+
+
+
+
+
+void serialized_t2Fit(pulsar *psr, unsigned int npsr, const char *covarFuncFile, MPI_Comm comm) {
+  int rank, size;
+  MPI_Comm_rank(comm, &rank);
+  MPI_Comm_size(comm, &size);
+  MPI_Status status;
+
+  // 1. Wait for the previous rank to finish (rank 0 does not wait)
+  if (rank > 0) {
+    // Receive a zero-byte signal from the previous rank
+    MPI_Recv(NULL, 0, MPI_BYTE, rank - 1, 0, comm, &status);
+  }
+
+  // 2. --- Your serialized code block ---
+  // Only one rank executes t2Fit at a time.
+  t2Fit(psr, npsr, covarFuncFile);
+  // ------------------------------------
+
+  // 3. Signal the next rank that it can proceed (last rank does not send)
+  if (rank < size - 1) {
+    // Send a zero-byte signal to the next rank
+    MPI_Send(NULL, 0, MPI_BYTE, rank + 1, 0, comm);
+  }
+}
+
 
 void fastephemeris_routines(pulsar *psr,int npsr)
 {
@@ -1698,8 +1768,9 @@ extern "C" int graphicalInterface(int argc, char **argv,
 	  if (iteration==0)          /* Only fit to pre-fit residuals */
 	    {
 	      logdbg("calling doFit");
-
-	      t2Fit(psr,npsr,covarFuncFile);
+	      //t2Fit(psr,npsr,covarFuncFile);
+	      //serialized_t2Fit(psr, npsr, covarFuncFile, MPI_COMM_WORLD);
+	      batched_t2Fit(psr, npsr, covarFuncFile, 8, MPI_COMM_WORLD);
 	      logdbg("completed doFit");
 	    }
 	  if (iteration==1 || onlypre==1)
