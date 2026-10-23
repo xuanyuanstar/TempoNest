@@ -104,7 +104,7 @@ extern "C" void copy_staticTmat_(double *T, int totalsize, int Nobs);
  * A barrier ensures the entire batch finishes before the next batch starts.
  *
  * Parameters:
- *   psr            - Pulsar structure (in/out)
+ *   psr            - PulTsar structure (in/out)
  *   npsr           - Number of pulsars
  *   covarFuncFile  - Covariance function file
  *   batch_size     - Number of ranks that call t2Fit concurrently in each batch
@@ -3195,12 +3195,13 @@ extern "C" int graphicalInterface(int argc, char **argv,
 		context=MNS;
 
 
-
-
-
 		NoiseMatrix NoiseMat;
+		double *NT=new double[((MNStruct *)context)->pulse->nobs * ((MNStruct *)context)->totalsize];
 		int nflag, nepoch, nblock;
 		int *block_sizes = new int[((MNStruct *)context)->pulse->nobs];
+
+		memset(NT, 0, sizeof(double)*((MNStruct *)context)->pulse->nobs * ((MNStruct *)context)->totalsize);
+		((MNStruct *)context)->StoredNT = NT;
 
 		// Allocate white-noise matrix for Kernal ECORR
 		if(((MNStruct *)context)->incNGJitter >0 && ((MNStruct *)context)->KJitter == 1){

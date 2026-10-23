@@ -320,6 +320,7 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 	double *Resvec=new double[((MNStruct *)globalcontext)->pulse->nobs];
 	int fitcount=0;
 	NoiseMatrix NoiseMat = ((MNStruct *)globalcontext)->StoredNoiseMatrix; // Block diagonal white-noise matrix containing ECORR
+	double *NT = ((MNStruct *)globalcontext)->StoredNT;
 
 	for (int b = 0; b < NoiseMat.NJEpochs; ++b) {
 	  memset(NoiseMat.blocks[b], 0, sizeof(double) * NoiseMat.block_sizes[b] * NoiseMat.block_sizes[b]);
@@ -1705,8 +1706,7 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 	logtchk("Starting algebra");
 	double *NTd = new double[totalsize]; // d in Eq. 17 of Len2014
 	double *TNT=new double[totalsize*totalsize];   // SIGMA in Eq. 17 of Len2014
-	double *NT;
-	NT=new double[((MNStruct *)globalcontext)->pulse->nobs*totalsize];
+
 	memset(NTd, 0, sizeof(double) * totalsize);
 	memset(TNT, 0, sizeof(double) * totalsize*totalsize);
 	memset(NT, 0, sizeof(double)*((MNStruct *)globalcontext)->pulse->nobs*totalsize);
@@ -1756,7 +1756,6 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 	}
 
 	logtchk("Fnishing main algebra");
-	delete[] NT;
 
 	// Calculate SIGMA = F^T * N^-1 * F + phi in Eq. (17) of Len2014, phi = powercoeff
 	for(int j=0;j<totCoeff;j++){

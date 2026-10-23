@@ -148,6 +148,7 @@ typedef struct {
 	int storeFMatrices;
 	double *StoredTMatrix;
         NoiseMatrix StoredNoiseMatrix;
+        double *StoredNT;
 	double *StoredDMVals;
 	int *TimingGradientSigns;
 	int usecosiprior;
