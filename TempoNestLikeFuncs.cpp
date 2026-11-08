@@ -125,15 +125,6 @@ void compute_all_three(const NoiseMatrix &NoiseMat,
   int one = 1;
 
   int N = NoiseMat.nobs;
-
-  // Consistency check
-  int total = 0;
-  for (int b = 0; b < NoiseMat.NJEpochs; ++b)
-    total += NoiseMat.block_sizes[b];
-  if (total != N) {
-    throw std::runtime_error("compute_all_three: block_sizes sum != nobs");
-  }
-
   double *F_nc = const_cast<double*>(F);
 
   tNt = 0.0;
@@ -141,27 +132,40 @@ void compute_all_three(const NoiseMatrix &NoiseMat,
   sign = 1.0;
   int offset = 0;
 
+  // Verify that the pre-allocated G_buffer is large enough
+  if (NoiseMat.G_buffer_cols < M + 1) {
+    throw std::runtime_error(
+			     "compute_all_three: G_buffer_cols is too small for M+1.");
+  }
+
   for (int b = 0; b < NoiseMat.NJEpochs; ++b) {
     int n = NoiseMat.block_sizes[b];
     int nrhs = M + 1;
-    double beta = (b == 0) ? 0.0 : 1.0;   // overwrite on first block
 
-    // Copy the dense block into a working array
-    double *work = new double[n * n];
+    // Verify that the work buffers are large enough
+    if (n > NoiseMat.max_block_size) {
+      throw std::runtime_error(
+			       "compute_all_three: block size exceeds max_block_size.");
+    }
+
+    // Use pre-allocated work buffers
+    double *work = NoiseMat.work_buffer;
+    int *ipiv = NoiseMat.ipiv_buffer;
+    double *G = NoiseMat.G_buffer;
+
+    // Copy the dense block into the work buffer
     for (int j = 0; j < n * n; ++j)
       work[j] = NoiseMat.blocks[b][j];
 
     // LU factorization
-    int *ipiv = new int[n];
     int info = 0;
     dgetrf_(&n, &n, work, &n, ipiv, &info);
 
     if (info < 0) {
-      delete[] ipiv; delete[] work;
       throw std::runtime_error("dgetrf: illegal argument.");
     } else if (info > 0) {
-      delete[] ipiv; delete[] work;
-      logdet = -INFINITY; sign = 0.0;
+      logdet = -INFINITY;
+      sign = 0.0;
       return;
     }
 
@@ -170,14 +174,16 @@ void compute_all_three(const NoiseMatrix &NoiseMat,
       double d = work[i*n + i];
       if (d < 0.0) { sign = -sign; logdet += std::log(-d); }
       else if (d > 0.0) { logdet += std::log(d); }
-      else { logdet = -INFINITY; sign = 0.0;
-	delete[] ipiv; delete[] work; return; }
+      else {
+	logdet = -INFINITY;
+	sign = 0.0;
+	return;
+      }
     }
     for (int i = 0; i < n; ++i)
       if (ipiv[i] != (i+1)) sign = -sign;
 
-    // Build combined RHS [F_b | t_b]
-    double *G = new double[n * nrhs];
+    // Build combined RHS [F_b | t_b] in G
     for (int j = 0; j < M; ++j)
       for (int i = 0; i < n; ++i)
 	G[j*n + i] = F[j*N + (offset + i)];
@@ -187,12 +193,14 @@ void compute_all_three(const NoiseMatrix &NoiseMat,
     // Solve N_b * G = [F_b | t_b]
     dgetrs_("N", &n, &nrhs, work, &n, ipiv, G, &n, &info);
     if (info != 0) {
-      delete[] G; delete[] ipiv; delete[] work;
       throw std::runtime_error("dgetrs: solve failed.");
     }
 
     double *Gb = G;
     double *gb = G + M*n;
+
+    // Use beta = (b == 0) ? 0.0 : 1.0 to overwrite on the first block
+    double beta = (b == 0) ? 0.0 : 1.0;
 
     // FtNF += F_b^T * Gb
     dgemm_("T", "N", &M, &M, &n,
@@ -210,7 +218,6 @@ void compute_all_three(const NoiseMatrix &NoiseMat,
     for (int i = 0; i < n; ++i)
       tNt += t[offset + i] * gb[i];
 
-    delete[] G; delete[] ipiv; delete[] work;
     offset += n;
   }
 }
@@ -317,16 +324,29 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 	long double LDparams[numfit];
 	for(int i = 0; i < numfit; i++){LDparams[i]=0;}
 	double Fitparams[numfit];
-	double *Resvec=new double[((MNStruct *)globalcontext)->pulse->nobs];
 	int fitcount=0;
 	NoiseMatrix NoiseMat = ((MNStruct *)globalcontext)->StoredNoiseMatrix; // Block diagonal white-noise matrix containing ECORR
 	double *NT = ((MNStruct *)globalcontext)->StoredNT;
+	double *TNT= ((MNStruct *)globalcontext)->StoredTNT;
+	double *TNT2= ((MNStruct *)globalcontext)->StoredTNT2;
+
+	double *Resvec= ((MNStruct *)globalcontext)->StoredResvec;
+	double *Noise= ((MNStruct *)globalcontext)->StoredNoise; // N^-1 in Eq. 17 of Len2014
+	double *DMVec= ((MNStruct *)globalcontext)->StoredDMVec;
+	double *ScatVec= ((MNStruct *)globalcontext)->StoredScatVec;
+	double *SWVec= ((MNStruct *)globalcontext)->StoredSWVec;
+
+	memset(Resvec, 0, sizeof(double) * ((MNStruct *)globalcontext)->pulse->nobs);
+	memset(Noise, 0, sizeof(double) * ((MNStruct *)globalcontext)->pulse->nobs);
+	memset(DMVec, 0, sizeof(double) * ((MNStruct *)globalcontext)->pulse->nobs);
+	memset(ScatVec, 0, sizeof(double) * ((MNStruct *)globalcontext)->pulse->nobs);
+	memset(SWVec, 0, sizeof(double) * ((MNStruct *)globalcontext)->pulse->nobs);
 
 	for (int b = 0; b < NoiseMat.NJEpochs; ++b) {
 	  memset(NoiseMat.blocks[b], 0, sizeof(double) * NoiseMat.block_sizes[b] * NoiseMat.block_sizes[b]);
 	}
 
-	//printf("%i %i\n", NoiseMat.NJEpochs, NoiseMat.nobs);
+	//printf("start likelihood %i %i\n", NoiseMat.NJEpochs, NoiseMat.nobs);
 	//for(int i=0;i<NoiseMat.NJEpochs;i++)
 	//  memset(NoiseMat.block);
 	//  {
@@ -496,10 +516,7 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 /////////////////////////Get White Noise vector or matrix///////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////  
 
-	double *Noise;	// N^-1 in Eq. 17 of Len2014
 	double *BATvec;
-
-	Noise=new double[((MNStruct *)globalcontext)->pulse->nobs];
 
 	if(((MNStruct *)globalcontext)->numFitEFAC == 0){
 		EFAC=new double*[((MNStruct *)globalcontext)->EPolTerms];
@@ -796,8 +813,6 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 
 
 	double *freqs = new double[totCoeff];
-	double *DMVec=new double[((MNStruct *)globalcontext)->pulse->nobs];
-
 	
 	double freqdet=0;
 	int startpos=0;
@@ -1240,8 +1255,6 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 /////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////Scattering variations ////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
-       double *ScatVec=new double[((MNStruct *)globalcontext)->pulse->nobs];
-
 	if(((MNStruct *)globalcontext)->incScat > 0) {
 	        if(((MNStruct *)globalcontext)->storeFMatrices == 0)
 	            for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++)
@@ -1292,8 +1305,6 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 /////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////Solar wind variations ////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
-	double *SWVec=new double[((MNStruct *)globalcontext)->pulse->nobs];
-
 	if(((MNStruct *)globalcontext)->incSW > 0) {
 	    for(int o=0;o<((MNStruct *)globalcontext)->pulse->nobs; o++)
 	      SWVec[o]=((MNStruct *)globalcontext)->pulse->obsn[o].tdis2 / ((MNStruct *)globalcontext)->pulse->ne_sw;
@@ -1705,10 +1716,10 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 
 	logtchk("Starting algebra");
 	double *NTd = new double[totalsize]; // d in Eq. 17 of Len2014
-	double *TNT=new double[totalsize*totalsize];   // SIGMA in Eq. 17 of Len2014
 
 	memset(NTd, 0, sizeof(double) * totalsize);
-	memset(TNT, 0, sizeof(double) * totalsize*totalsize);
+	memset(TNT, 0, sizeof(double) * totalsize*totalsize);  // SIGMA in Eq. 17 of Len2014
+	memset(TNT2, 0, sizeof(double) * totalsize*totalsize);
 	memset(NT, 0, sizeof(double)*((MNStruct *)globalcontext)->pulse->nobs*totalsize);
 	
 	// Calculate N^-1 * F
@@ -1728,31 +1739,6 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 	else{
 	  // Calculate F^T * N^-1 * F, F^T * N^-1 *dt, dt^T * N^-1 * dt at the same time
 	  compute_all_three(NoiseMat, totalsize, TotalMatrix, Resvec, TNT, timelike, NTd, tdet, dsign);
-
-	  //printf("1: %lf %lf \n", timelike, tdet);
-	  //printf("1: %lf %lf %lf %lf \n", TNT[totalsize], TNT[totalsize*2], NTd[100], NTd[200]);
-
-	  //memset(NTd, 0, sizeof(double) * totalsize);
-	//memset(TNT, 0, sizeof(double) * totalsize*totalsize);
-	//memset(NT, 0, sizeof(double)*((MNStruct *)globalcontext)->pulse->nobs*totalsize);
-	//timelike=0.0;tdet=0.0;
-
-	  // Get N^-1 and log determinant of N
-	  //std::memcpy(InvMNoise, MNoise, ((MNStruct *)globalcontext)->pulse->nobs*((MNStruct *)globalcontext)->pulse->nobs*sizeof(double));
-	  //invert_block_diagonal(((MNStruct *)globalcontext)->pulse->nobs, InvMNoise, ((MNStruct *)globalcontext)->numNGJitterEpochs, block_sizes, tdet, dsign);
-
-	  // Get N^-1 * dt
-	  //vector_dgemv(InvMNoise, Resvec, Ndt,((MNStruct *)globalcontext)->pulse->nobs,((MNStruct *)globalcontext)->pulse->nobs, 'N');
-
-	  // Get dt^T * (N^-1 * dt)
-	  //for(int o=0; o<((MNStruct *)globalcontext)->pulse->nobs; o++){
-	    //  timelike+=Resvec[o] * Ndt[o];}
-
-	  //vector_dgemm(InvMNoise, TotalMatrix, NT, ((MNStruct *)globalcontext)->pulse->nobs, ((MNStruct *)globalcontext)->pulse->nobs, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, 'N', 'N');
-	  //vector_dgemm(TotalMatrix, NT , TNT, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, ((MNStruct *)globalcontext)->pulse->nobs, totalsize, 'T', 'N');
-	  //vector_dgemv(NT,Resvec,NTd,((MNStruct *)globalcontext)->pulse->nobs,totalsize,'T');
-	  //printf("2: %lf %lf \n", timelike, tdet);
-	  //printf("2: %lf %lf %lf %lf \n", TNT[totalsize], TNT[totalsize*2], NTd[100], NTd[200]);
 	}
 
 	logtchk("Fnishing main algebra");
@@ -1771,7 +1757,6 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 	double freqlike=0;
 	double *WorkCoeff = new double[totalsize];
 	double *WorkCoeff2 = new double[totalsize];
-	double *TNT2=new double[totalsize*totalsize];
 	
 	std::memcpy(TNT2, TNT, totalsize*totalsize*sizeof(double));
 	std::memcpy(WorkCoeff, NTd, totalsize * sizeof(double));
@@ -1815,9 +1800,6 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 
 	if(badshape == 1){lnew=-pow(10.0,20);}
 
-	delete[] DMVec;
-	delete[] ScatVec;
-	delete[] SWVec;
 	delete[] WorkCoeff;
 	delete[] WorkCoeff2;
 	for(int i=0; i < ((MNStruct *)globalcontext)->EPolTerms; i++) delete[] EFAC[i];
@@ -1827,11 +1809,6 @@ double NewLRedMarginLogLike(double Cube[], int ndim, double phi[], int nDerived,
 	delete[] powercoeff;
 	delete[] NTd;
 	delete[] freqs;
-	delete[] Noise;
-	delete[] Resvec;
-	delete[] TNT;
-	delete[] TNT2;
-	//delete[] Ndt;
 
 	if(((MNStruct *)globalcontext)->incNGJitter >0 && ((MNStruct *)globalcontext)->KJitter != 1){
 		delete[] ECORRPrior;

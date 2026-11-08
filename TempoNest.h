@@ -28,12 +28,27 @@
 
 #include <vector>
 
+//struct NoiseMatrix {
+//  int nobs;                // total number of TOAs (sum of block sizes)
+//  int NJEpochs;            // number of ECORR blocks
+//  int *block_sizes;        // length NJEpochs: size of each block
+//  double **blocks;         // NJEpochs pointers, each to a dense n_b x n_b block
+//};
+
 struct NoiseMatrix {
-  int nobs;                // total number of TOAs (sum of block sizes)
+  int nobs;                // total number of TOAs
   int NJEpochs;            // number of ECORR blocks
   int *block_sizes;        // length NJEpochs: size of each block
   double **blocks;         // NJEpochs pointers, each to a dense n_b x n_b block
+
+  // Pre-allocated work buffers (sized for the largest block)
+  int max_block_size;      // maximum n_b across all blocks
+  double *work_buffer;     // max_block_size2 doubles
+  int *ipiv_buffer;        // max_block_size ints
+  double *G_buffer;        // max_block_size ¡Á (M+1) doubles
+  int G_buffer_cols;       // number of columns in G_buffer (M+1)
 };
+
 
 typedef struct {
 	pulsar *pulse;
@@ -149,6 +164,13 @@ typedef struct {
 	double *StoredTMatrix;
         NoiseMatrix StoredNoiseMatrix;
         double *StoredNT;
+        double *StoredTNT;
+        double *StoredTNT2;
+        double *StoredResvec;
+        double *StoredNoise;
+        double *StoredDMVec;
+        double *StoredScatVec;
+        double *StoredSWVec;
 	double *StoredDMVals;
 	int *TimingGradientSigns;
 	int usecosiprior;

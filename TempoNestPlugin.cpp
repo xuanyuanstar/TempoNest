@@ -3194,14 +3194,35 @@ extern "C" int graphicalInterface(int argc, char **argv,
 		getNGJitterMatrix(((MNStruct *)context)->pulse, MNS->NGJitterMatrix, ((MNStruct *)context)->numNGJitterEpochs);
 		context=MNS;
 
-
 		NoiseMatrix NoiseMat;
 		double *NT=new double[((MNStruct *)context)->pulse->nobs * ((MNStruct *)context)->totalsize];
+		double *TNT=new double[((MNStruct *)context)->totalsize * ((MNStruct *)context)->totalsize];
+		double *TNT2=new double[((MNStruct *)context)->totalsize * ((MNStruct *)context)->totalsize];
+		double *Resvec=new double[((MNStruct *)context)->pulse->nobs];
+		double *Noise=new double[((MNStruct *)context)->pulse->nobs];
+		double *DMVec=new double[((MNStruct *)context)->pulse->nobs];
+		double *ScatVec=new double[((MNStruct *)context)->pulse->nobs];
+		double *SWVec=new double[((MNStruct *)context)->pulse->nobs];
 		int nflag, nepoch, nblock;
 		int *block_sizes = new int[((MNStruct *)context)->pulse->nobs];
 
 		memset(NT, 0, sizeof(double)*((MNStruct *)context)->pulse->nobs * ((MNStruct *)context)->totalsize);
+		memset(TNT, 0, sizeof(double) * ((MNStruct *)context)->totalsize * ((MNStruct *)context)->totalsize);
+		memset(TNT2, 0, sizeof(double) * ((MNStruct *)context)->totalsize * ((MNStruct *)context)->totalsize);
+		memset(Resvec, 0, sizeof(double) * ((MNStruct *)context)->pulse->nobs);
+		memset(Noise, 0, sizeof(double) * ((MNStruct *)context)->pulse->nobs);
+		memset(DMVec, 0, sizeof(double) * ((MNStruct *)context)->pulse->nobs);
+		memset(ScatVec, 0, sizeof(double) * ((MNStruct *)context)->pulse->nobs);
+		memset(SWVec, 0, sizeof(double) * ((MNStruct *)context)->pulse->nobs);
+
 		((MNStruct *)context)->StoredNT = NT;
+		((MNStruct *)context)->StoredTNT = TNT;
+		((MNStruct *)context)->StoredTNT2 = TNT2;
+		((MNStruct *)context)->StoredResvec = Resvec;
+		((MNStruct *)context)->StoredNoise = Noise;
+		((MNStruct *)context)->StoredDMVec = DMVec;
+		((MNStruct *)context)->StoredScatVec = ScatVec;
+		((MNStruct *)context)->StoredSWVec = SWVec;
 
 		// Allocate white-noise matrix for Kernal ECORR
 		if(((MNStruct *)context)->incNGJitter >0 && ((MNStruct *)context)->KJitter == 1){
@@ -3259,6 +3280,23 @@ extern "C" int graphicalInterface(int argc, char **argv,
 		    NoiseMat.blocks[b] = new double[n * n];
 		    memset(NoiseMat.blocks[b], 0, sizeof(double) * n * n);
 		  }
+
+		  // Find the maximum block size
+		  int max_n = 0;
+		  int M_max = ((MNStruct *)context)->totalsize; 
+		  for (int b = 0; b < NoiseMat.NJEpochs; ++b) {
+		    if (NoiseMat.block_sizes[b] > max_n)
+		      max_n = NoiseMat.block_sizes[b];
+		  }
+		  NoiseMat.max_block_size = max_n;
+
+		  // Allocate the work buffers
+		  NoiseMat.work_buffer = new double[max_n * max_n];
+		  NoiseMat.ipiv_buffer = new int[max_n];
+
+		  // G_buffer is sized for the maximum M the routine will see
+		  NoiseMat.G_buffer_cols = M_max + 1;
+		  NoiseMat.G_buffer = new double[max_n * NoiseMat.G_buffer_cols];
 		}
 		catch (const std::bad_alloc& e) {
 		}
